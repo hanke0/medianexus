@@ -1,0 +1,148 @@
+.page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(18, 24, 33, 0.7);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.card button {
+  margin-top: auto;
+  align-self: start;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+}
+
+.result {
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(62, 207, 142, 0.28);
+  background: rgba(62, 207, 142, 0.1);
+  color: var(--ok);
+}
+
+.result ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  color: #b7f0d3;
+}
+
+.result p {
+  margin: 0.4rem 0 0;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.catalog {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.catalogHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.catalogHead h3 {
+  margin: 0;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.tabs button.active {
+  background: rgba(232, 93, 76, 0.18);
+  color: #ffd2cb;
+}
+
+.table {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.4fr auto auto 1.4fr;
+  gap: 0.65rem;
+  padding: 0.75rem 1rem;
+  align-items: center;
+}
+
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 800px) {
+  .row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .row span:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+}

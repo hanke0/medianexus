@@ -1,0 +1,17 @@
+{
+  "name": "medianexus",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "npm run build -w medianexus-frontend",
+    "build:backend": "cargo build --release -p medianexus-backend",
+    "build:bundle": "npm run build:frontend && cargo build --release -p medianexus-backend --features embed-frontend",
+    "dev:frontend": "npm run dev -w medianexus-frontend",
+    "dev:backend": "cargo run -p medianexus-backend",
+    "typecheck": "npm exec -w medianexus-frontend -- tsc --noEmit -p tsconfig.json"
+  }
+}

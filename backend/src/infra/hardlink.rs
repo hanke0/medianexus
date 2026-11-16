@@ -1,0 +1,197 @@
+use crate::error::{AppError, AppResult};
+use std::path::{Path, PathBuf};
+
+const VIDEO_EXTS: &[&str] = &[
+    "mkv", "mp4", "avi", "mov", "wmv", "ts", "m2ts", "flv", "webm", "mpg", "mpeg",
+];
+
+#[derive(Debug, Clone)]
+pub struct FolderNameVars<'a> {
+    pub title: &'a str,
+    pub year: Option<&'a str>,
+    pub original_title: Option<&'a str>,
+    pub tmdb_id: i64,
+}
+
+/// Library subfolder for a track media type. Movies → `movies`; everything else → `tv`.
+pub fn library_kind_dir(media_type: &str) -> &'static str {
+    match media_type {
+        "movie" => "movies",
+        _ => "tv",
+    }
+}
+
+/// Recursively hardlink files from `src` into `dest_root/{folder}/...`.
+/// Falls back to copy if hardlink is not supported (cross-device).
+pub async fn hardlink_media(src: &Path, dest_root: &Path, folder_name: &str) -> AppResult<PathBuf> {
+    let safe_title = sanitize_name(folder_name);
+    let dest_dir = dest_root.join(&safe_title);
+    tokio::fs::create_dir_all(&dest_dir).await?;
+
+    let src = src.to_path_buf();
+    let dest_dir_clone = dest_dir.clone();
+    tokio::task::spawn_blocking(move || hardlink_recursive(&src, &dest_dir_clone))
+        .await
+        .map_err(|e| AppError::Internal(format!("hardlink task join: {e}")))??;
+
+    Ok(dest_dir)
+}
+
+/// Render folder name from template, e.g. `{{title}}-{{year}}`.
+pub fn render_folder_name(template: &str, vars: &FolderNameVars<'_>) -> String {
+    let year = vars.year.unwrap_or("");
+    let original = vars.original_title.unwrap_or("");
+    let rendered = template
+        .replace("{{title}}", vars.title)
+        .replace("{{year}}", year)
+        .replace("{{original_title}}", original)
+        .replace("{{tmdb_id}}", &vars.tmdb_id.to_string());
+
+    cleanup_template_result(&rendered)
+}
+
+fn cleanup_template_result(s: &str) -> String {
+    let mut out = s.to_string();
+    // Collapse repeated separators left by empty placeholders.
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    while out.contains("  ") {
+        out = out.replace("  ", " ");
+    }
+    out.trim()
+        .trim_matches(|c: char| matches!(c, '-' | '_' | '.' | ' '))
+        .to_string()
+}
+
+fn hardlink_recursive(src: &Path, dest_dir: &Path) -> AppResult<()> {
+    let meta = std::fs::metadata(src)?;
+    if meta.is_file() {
+        if is_video(src) || is_subtitle(src) {
+            let dest = dest_dir.join(
+                src.file_name()
+                    .ok_or_else(|| AppError::Internal("invalid file name".into()))?,
+            );
+            link_or_copy(src, &dest)?;
+        }
+        return Ok(());
+    }
+
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let nested = dest_dir.join(entry.file_name());
+                std::fs::create_dir_all(&nested)?;
+                hardlink_recursive(&path, &nested)?;
+            } else {
+                hardlink_recursive(&path, dest_dir)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn link_or_copy(src: &Path, dest: &Path) -> AppResult<()> {
+    if dest.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::hard_link(src, dest) {
+        Ok(()) => Ok(()),
+        Err(e)
+            if e.raw_os_error() == Some(18) || e.kind() == std::io::ErrorKind::CrossesDevices =>
+        {
+            // EXDEV — fall back to copy
+            tracing::warn!(
+                "hardlink not supported for {} → {}, copying instead",
+                src.display(),
+                dest.display()
+            );
+            std::fs::copy(src, dest)?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn is_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| VIDEO_EXTS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+        .unwrap_or(false)
+}
+
+fn is_subtitle(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "srt" | "ass" | "ssa" | "sub" | "idx" | "vtt"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn sanitize_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.');
+    if trimmed.is_empty() {
+        "media".into()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_title_year() {
+        let name = render_folder_name(
+            "{{title}}-{{year}}",
+            &FolderNameVars {
+                title: "黑客帝国",
+                year: Some("1999"),
+                original_title: Some("The Matrix"),
+                tmdb_id: 603,
+            },
+        );
+        assert_eq!(name, "黑客帝国-1999");
+    }
+
+    #[test]
+    fn drops_trailing_dash_when_year_missing() {
+        let name = render_folder_name(
+            "{{title}}-{{year}}",
+            &FolderNameVars {
+                title: "Untitled",
+                year: None,
+                original_title: None,
+                tmdb_id: 1,
+            },
+        );
+        assert_eq!(name, "Untitled");
+    }
+
+    #[test]
+    fn library_kind_dirs() {
+        assert_eq!(library_kind_dir("movie"), "movies");
+        assert_eq!(library_kind_dir("tv"), "tv");
+        assert_eq!(library_kind_dir("other"), "tv");
+    }
+}
