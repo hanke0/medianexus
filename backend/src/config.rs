@@ -1,3 +1,4 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -90,7 +91,12 @@ Usage:
   medianexus-backend [options]
 
 Options:
-  --host <addr>              Listen address (env HOST, default 127.0.0.1)
+  --host <addr>              Listen address (env HOST, default lan)
+                             lan: 127.0.0.1, assigned ::1, and private LAN
+                             only (RFC1918 and IPv6 ULA)
+                             0.0.0.0 or :: listens on every interface,
+                             including public addresses
+                             any other address is bound as given
   --port <port>              Listen port (env PORT, default 8080)
   --database-url <url>       SQLite URL (env DATABASE_URL)
                              default: sqlite:medianexus.db?mode=rwc
@@ -145,7 +151,7 @@ impl Config {
             host: cli
                 .host
                 .or_else(|| optional_env("HOST"))
-                .unwrap_or_else(|| "127.0.0.1".into()),
+                .unwrap_or_else(|| "lan".into()),
             port: cli
                 .port
                 .or_else(|| optional_env("PORT").and_then(|p| p.parse().ok()))
@@ -172,4 +178,213 @@ fn optional_env(key: &str) -> Option<String> {
 
 fn generate_jwt_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+#[derive(Debug)]
+pub struct ListenAddrError {
+    message: String,
+}
+
+impl ListenAddrError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ListenAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ListenAddrError {}
+
+/// Addresses the process may bind.
+///
+/// `lan` is loopback plus private LAN only: 127.0.0.0/8, ::1, RFC1918, and
+/// IPv6 ULA (fc00::/7). Any other host is bound as given, including public
+/// addresses and wildcards (`0.0.0.0`, `::`).
+pub fn resolve_listen_addrs(host: &str, port: u16) -> Result<Vec<SocketAddr>, ListenAddrError> {
+    let host = host.trim();
+    let ips = if host.eq_ignore_ascii_case("lan") {
+        lan_ips()?
+    } else {
+        explicit_ips(host)?
+    };
+    if ips.is_empty() {
+        return Err(ListenAddrError::new(format!(
+            "no addresses resolved for listen host {host}"
+        )));
+    }
+    Ok(ips
+        .into_iter()
+        .map(|ip| SocketAddr::new(ip, port))
+        .collect())
+}
+
+fn lan_ips() -> Result<Vec<IpAddr>, ListenAddrError> {
+    let ifaces = if_addrs::get_if_addrs()
+        .map_err(|err| ListenAddrError::new(format!("failed to list network interfaces: {err}")))?;
+    let mut ips = Vec::new();
+    for iface in ifaces {
+        let ip = iface.ip();
+        if is_allowed_listen_ip(ip) {
+            ips.push(ip);
+        }
+    }
+    // Always include IPv4 loopback, even if interface enumeration missed `lo`.
+    ips.push(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    Ok(normalize_ips(ips))
+}
+
+fn explicit_ips(host: &str) -> Result<Vec<IpAddr>, ListenAddrError> {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return Ok(vec![ip]);
+    }
+    let mut ips = Vec::new();
+    let addrs = (host, 0u16)
+        .to_socket_addrs()
+        .map_err(|err| ListenAddrError::new(format!("invalid listen address {host}: {err}")))?;
+    for addr in addrs {
+        ips.push(addr.ip());
+    }
+    if ips.is_empty() {
+        return Err(ListenAddrError::new(format!(
+            "invalid listen address {host}"
+        )));
+    }
+    Ok(normalize_ips(ips))
+}
+
+fn is_allowed_listen_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_allowed_v4(v4),
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_allowed_v4(v4);
+            }
+            v6.is_loopback() || is_unique_local(v6)
+        }
+    }
+}
+
+fn is_allowed_v4(ip: Ipv4Addr) -> bool {
+    ip.is_loopback() || ip.is_private()
+}
+
+/// fc00::/7 unique local addresses.
+fn is_unique_local(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
+fn normalize_ips(mut ips: Vec<IpAddr>) -> Vec<IpAddr> {
+    ips.sort_by_key(|ip| ip_sort_key(*ip));
+    ips.dedup();
+    ips
+}
+
+fn ip_sort_key(ip: IpAddr) -> (u8, u8, u128) {
+    let group = u8::from(!ip.is_loopback());
+    match ip {
+        IpAddr::V4(v4) => (group, 0, u128::from(u32::from(v4))),
+        IpAddr::V6(v6) => (group, 1, u128::from(v6)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allows_wildcard_and_public_addresses() {
+        let cases = [
+            ("0.0.0.0", IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            ("::", IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            ("[::]", IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            ("1.1.1.1", IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))),
+            ("8.8.8.8", IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            ("2001:db8::1", "2001:db8::1".parse().expect("doc prefix")),
+        ];
+        for (host, ip) in cases {
+            let addrs = resolve_listen_addrs(host, 8080).unwrap_or_else(|err| {
+                panic!("{host}: {err}");
+            });
+            assert_eq!(addrs, vec![SocketAddr::new(ip, 8080)], "{host}");
+        }
+    }
+
+    #[test]
+    fn allows_explicit_loopback_and_private_addresses() {
+        let cases = [
+            ("127.0.0.1", IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            ("10.1.2.3", IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))),
+            ("172.16.0.1", IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))),
+            ("172.31.255.1", IpAddr::V4(Ipv4Addr::new(172, 31, 255, 1))),
+            ("192.168.1.20", IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))),
+            ("::1", IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            ("[::1]", IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            ("fd00::1", "fd00::1".parse().expect("ula")),
+        ];
+        for (host, ip) in cases {
+            let addrs = resolve_listen_addrs(host, 8080).unwrap_or_else(|err| {
+                panic!("{host}: {err}");
+            });
+            assert_eq!(addrs, vec![SocketAddr::new(ip, 8080)], "{host}");
+        }
+    }
+
+    #[test]
+    fn lan_mode_is_only_loopback_and_private() {
+        let addrs = resolve_listen_addrs("LAN", 8080).expect("lan");
+        assert!(
+            addrs
+                .iter()
+                .any(|addr| addr.ip() == IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            "missing 127.0.0.1: {addrs:?}"
+        );
+        assert!(addrs.iter().all(|addr| addr.port() == 8080));
+        assert!(addrs.iter().all(|addr| is_allowed_listen_ip(addr.ip())));
+        assert!(addrs.iter().all(|addr| !addr.ip().is_unspecified()));
+        let mut sorted = addrs.clone();
+        sorted.sort_by_key(|addr| ip_sort_key(addr.ip()));
+        sorted.dedup();
+        assert_eq!(addrs, sorted);
+    }
+
+    #[tokio::test]
+    async fn lan_sockets_bind_their_own_addresses() {
+        let probe = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("probe");
+        let port = probe.local_addr().expect("probe addr").port();
+        drop(probe);
+
+        let addrs = resolve_listen_addrs("lan", port).expect("lan");
+        let mut listeners = Vec::new();
+        for addr in addrs {
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await
+                .unwrap_or_else(|err| panic!("bind {addr}: {err}"));
+            assert_eq!(listener.local_addr().expect("local").ip(), addr.ip());
+            listeners.push(listener);
+        }
+
+        let _stream = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+            .await
+            .expect("connect localhost");
+        drop(listeners);
+    }
+
+    #[test]
+    fn localhost_name_stays_on_loopback() {
+        let addrs = resolve_listen_addrs("localhost", 8080).expect("localhost");
+        assert!(!addrs.is_empty());
+        assert!(addrs.iter().all(|addr| addr.ip().is_loopback()));
+    }
 }

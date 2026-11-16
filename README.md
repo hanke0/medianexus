@@ -16,7 +16,7 @@
 ## 快速开始
 
 ```bash
-# 后端（默认监听 127.0.0.1:8080，库文件 ./medianexus.db，入库目录 ./nexusmedia）
+# 后端（默认监听 127.0.0.1 与局域网私网地址，不监听公网；库文件 ./medianexus.db，入库目录 ./nexusmedia）
 cargo run -p medianexus-backend
 
 # 前端
@@ -36,7 +36,7 @@ npm run dev:frontend
 
 ```bash
 cargo run -p medianexus-backend -- \
-  --host 0.0.0.0 \
+  --host lan \
   --port 8080 \
   --database-url 'sqlite:medianexus.db?mode=rwc' \
   --library-dir nexusmedia \
@@ -47,7 +47,7 @@ cargo run -p medianexus-backend -- \
 
 | 项 | CLI | Env | 默认 |
 |----|-----|-----|------|
-| 监听地址 | `--host` | `HOST` | `127.0.0.1` |
+| 监听地址 | `--host` | `HOST` | `lan` |
 | 端口 | `--port` | `PORT` | `8080` |
 | 数据库 | `--database-url` / `--db` | `DATABASE_URL` | `sqlite:medianexus.db?mode=rwc` |
 | 入库目录 | `--library-dir` / `--library` | `LIBRARY_DIR` | `./nexusmedia`（自动创建 `movies/`、`tv/`） |
@@ -55,6 +55,10 @@ cargo run -p medianexus-backend -- \
 | 初始管理员 | `--admin-username` | `ADMIN_USERNAME` | `admin` |
 | 初始密码 | `--admin-password` | `ADMIN_PASSWORD` | `admin123` |
 | 版本 | `-V` / `--version` | — | 打印 `medianexus-backend <version>` 后退出 |
+
+`lan` 会同时绑定 `127.0.0.1`、网卡上已有的 `::1`，以及私网地址（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、IPv6 ULA `fc00::/7`），不包含公网网卡。要连公网一起听，用 `--host 0.0.0.0`（全部 IPv4）或 `--host ::`（全部 IPv6），也可以指定某个公网地址。
+
+开发时 Vite 只监听 `127.0.0.1:5173`，`/api` 由开发机代理到本机 `127.0.0.1:8080`。
 
 外部服务（TMDB / M-Team / qB / Plex / Jellyfin）保存在 SQLite `settings` 表，由网页管理。
 
