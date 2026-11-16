@@ -76,15 +76,7 @@ pub async fn find_in_libraries(
     let mut matches = Vec::new();
 
     if let Some(plex) = PlexClient::try_from_settings(http.clone(), settings) {
-        match find_in_plex(
-            &plex,
-            None,
-            media_type,
-            tmdb_id,
-            imdb_id,
-        )
-        .await
-        {
+        match find_in_plex(&plex, None, media_type, tmdb_id, imdb_id).await {
             Ok(found) => matches.extend(found),
             Err(e) => tracing::warn!("Plex library lookup failed: {e}"),
         }
@@ -152,15 +144,13 @@ fn jellyfin_authorization(api_key: &str) -> String {
 }
 
 /// Verify Jellyfin URL + API key via `/System/Info`.
-pub async fn test_jellyfin(
-    http: &reqwest::Client,
-    base: &str,
-    api_key: &str,
-) -> AppResult<()> {
+pub async fn test_jellyfin(http: &reqwest::Client, base: &str, api_key: &str) -> AppResult<()> {
     let base = base.trim().trim_end_matches('/');
     let api_key = api_key.trim();
     if base.is_empty() {
-        return Err(AppError::BadRequest("Jellyfin URL is not configured".into()));
+        return Err(AppError::BadRequest(
+            "Jellyfin URL is not configured".into(),
+        ));
     }
     if api_key.is_empty() {
         return Err(AppError::BadRequest(
@@ -561,9 +551,7 @@ async fn find_in_plex(
         format!("themoviedb://{tmdb_id}"),
         format!("com.plexapp.agents.themoviedb://{tmdb_id}?lang=en"),
     ] {
-        if let Some(hit) =
-            plex_guid_search(plex, &guid, "tmdb", &tmdb_id.to_string()).await?
-        {
+        if let Some(hit) = plex_guid_search(plex, &guid, "tmdb", &tmdb_id.to_string()).await? {
             return Ok(vec![hit]);
         }
     }
@@ -589,7 +577,11 @@ async fn plex_guid_search(
     matched_by: &str,
     external_id: &str,
 ) -> AppResult<Option<LibraryMatch>> {
-    let resp = plex.get("/library/all")?.query(&[("guid", guid)]).send().await?;
+    let resp = plex
+        .get("/library/all")?
+        .query(&[("guid", guid)])
+        .send()
+        .await?;
     if !resp.status().is_success() {
         return Ok(None);
     }
@@ -609,10 +601,7 @@ async fn plex_guid_search(
     Ok(None)
 }
 
-async fn plex_sections(
-    plex: &PlexClient,
-    only_id: Option<&str>,
-) -> AppResult<Vec<PlexSection>> {
+async fn plex_sections(plex: &PlexClient, only_id: Option<&str>) -> AppResult<Vec<PlexSection>> {
     let resp: PlexContainer = plex.send_json(plex.get("/library/sections")?).await?;
     let dirs = resp
         .media_container

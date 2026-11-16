@@ -240,7 +240,9 @@ pub async fn start_link(
         .error_for_status()?;
 
     let pin: PinCreateResponse = resp.json().await?;
-    let pin_id = pin.id.ok_or_else(|| AppError::Internal("Plex PIN missing id".into()))?;
+    let pin_id = pin
+        .id
+        .ok_or_else(|| AppError::Internal("Plex PIN missing id".into()))?;
     let pin_code = pin
         .code
         .ok_or_else(|| AppError::Internal("Plex PIN missing code".into()))?;
@@ -301,7 +303,10 @@ pub async fn poll_link(http: &reqwest::Client, db: &SqlitePool) -> AppResult<Ple
     }
     if !resp.status().is_success() {
         // 5xx / unexpected — keep pending for the next poll tick.
-        tracing::warn!(status, "Plex PIN poll temporary failure; keeping pending state");
+        tracing::warn!(
+            status,
+            "Plex PIN poll temporary failure; keeping pending state"
+        );
         return Ok(status_from_settings(&s));
     }
 
@@ -313,9 +318,8 @@ pub async fn poll_link(http: &reqwest::Client, db: &SqlitePool) -> AppResult<Ple
         }
     };
     if let Some(token) = body.auth_token.filter(|t| !t.trim().is_empty()) {
-        let exp = jwt_exp_claim(&token).unwrap_or_else(|| {
-            (Utc::now() + Duration::days(7)).timestamp()
-        });
+        let exp =
+            jwt_exp_claim(&token).unwrap_or_else(|| (Utc::now() + Duration::days(7)).timestamp());
         let mut s = settings::load(db).await?;
         s.plex_token = token;
         s.plex_token_expires_at = exp.to_string();
@@ -356,10 +360,7 @@ pub fn link_status(settings: &IntegrationSettings) -> PlexLinkStatus {
 }
 
 /// Refresh account JWT when near expiry, and keep PMS server token in sync.
-pub async fn refresh_token_if_needed(
-    http: &reqwest::Client,
-    db: &SqlitePool,
-) -> AppResult<bool> {
+pub async fn refresh_token_if_needed(http: &reqwest::Client, db: &SqlitePool) -> AppResult<bool> {
     let s = ensure_device_identity(db).await?;
     if s.plex_device_private_key.trim().is_empty() {
         return Ok(false);
@@ -388,8 +389,8 @@ pub async fn refresh_token_if_needed(
         let token = body.auth_token.ok_or_else(|| {
             AppError::Internal("Plex token refresh returned empty auth_token".into())
         })?;
-        let exp = jwt_exp_claim(&token)
-            .unwrap_or_else(|| (Utc::now() + Duration::days(7)).timestamp());
+        let exp =
+            jwt_exp_claim(&token).unwrap_or_else(|| (Utc::now() + Duration::days(7)).timestamp());
 
         let mut s = settings::load(db).await?;
         s.plex_token = token;
@@ -563,8 +564,7 @@ async fn fetch_nonce(http: &reqwest::Client, client_id: &str) -> AppResult<Strin
 
 fn generate_device_keypair() -> AppResult<(String, String, String)> {
     let mut seed = [0u8; 32];
-    getrandom::fill(&mut seed)
-        .map_err(|e| AppError::Internal(format!("getrandom failed: {e}")))?;
+    getrandom::fill(&mut seed).map_err(|e| AppError::Internal(format!("getrandom failed: {e}")))?;
     let signing = SigningKey::from_bytes(&seed);
     let verifying = signing.verifying_key();
     let priv_bytes = signing.to_bytes();
@@ -659,9 +659,8 @@ fn jwt_exp_claim(token: &str) -> Option<i64> {
 fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> AppResult<()> {
     let name = HeaderName::try_from(name)
         .map_err(|e| AppError::Internal(format!("invalid Plex header name {name}: {e}")))?;
-    let value = HeaderValue::from_str(value).map_err(|e| {
-        AppError::Internal(format!("invalid Plex header value for {name}: {e}"))
-    })?;
+    let value = HeaderValue::from_str(value)
+        .map_err(|e| AppError::Internal(format!("invalid Plex header value for {name}: {e}")))?;
     headers.insert(name, value);
     Ok(())
 }

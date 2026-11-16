@@ -236,13 +236,11 @@ pub async fn load(db: &SqlitePool) -> AppResult<IntegrationSettings> {
             "jellyfin_api_key" => s.jellyfin_api_key = value,
             "pt_primary_site" => s.pt_primary_site = value,
             "schedule_search_interval_secs" => {
-                s.schedule_search_interval_secs =
-                    parse_u64(&value, default_search_interval());
+                s.schedule_search_interval_secs = parse_u64(&value, default_search_interval());
             }
             "schedule_search_at" => s.schedule_search_at = normalize_clock(&value),
             "schedule_download_interval_secs" => {
-                s.schedule_download_interval_secs =
-                    parse_u64(&value, default_download_interval());
+                s.schedule_download_interval_secs = parse_u64(&value, default_download_interval());
             }
             "schedule_download_at" => s.schedule_download_at = normalize_clock(&value),
             "schedule_library_scan_interval_secs" => {
@@ -280,7 +278,10 @@ pub async fn save(db: &SqlitePool, s: &IntegrationSettings) -> AppResult<()> {
         ("plex_token_expires_at", s.plex_token_expires_at.as_str()),
         ("plex_server_token", s.plex_server_token.as_str()),
         ("plex_client_id", s.plex_client_id.as_str()),
-        ("plex_device_private_key", s.plex_device_private_key.as_str()),
+        (
+            "plex_device_private_key",
+            s.plex_device_private_key.as_str(),
+        ),
         ("plex_device_public_key", s.plex_device_public_key.as_str()),
         ("plex_device_kid", s.plex_device_kid.as_str()),
         ("plex_pin_id", s.plex_pin_id.as_str()),

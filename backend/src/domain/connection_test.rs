@@ -43,7 +43,10 @@ pub async fn test_connection(
                 settings.mteam_api_base.clone(),
                 settings.mteam_api_key.clone(),
             );
-            client.test_connection().await.map(|_| "M-Team 连接成功".into())
+            client
+                .test_connection()
+                .await
+                .map(|_| "M-Team 连接成功".into())
         }
         ConnectionTarget::Qbittorrent => {
             let clients = state.clients().await;
@@ -67,9 +70,7 @@ pub async fn test_connection(
                     message: "Plex 未配置：需要 URL 并用账号完成登录关联".into(),
                 });
             };
-            plex.test_connection()
-                .await
-                .map(|_| "Plex 连接成功".into())
+            plex.test_connection().await.map(|_| "Plex 连接成功".into())
         }
     };
 

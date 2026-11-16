@@ -55,7 +55,9 @@ impl QbittorrentClient {
     /// Verify WebUI URL + credentials by logging in.
     pub async fn test_connection(&self) -> AppResult<()> {
         if self.base.trim().is_empty() {
-            return Err(AppError::BadRequest("qBittorrent URL is not configured".into()));
+            return Err(AppError::BadRequest(
+                "qBittorrent URL is not configured".into(),
+            ));
         }
         self.invalidate().await;
         self.login().await?;

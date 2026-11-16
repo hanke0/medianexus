@@ -226,8 +226,14 @@ impl MTeamIndexer {
                     name: item.name.unwrap_or_default(),
                     size: value_to_string(&item.size.unwrap_or(serde_json::Value::Null))
                         .unwrap_or_default(),
-                    seeders: item.status.as_ref().and_then(|s| value_to_string_opt(&s.seeders)),
-                    leechers: item.status.as_ref().and_then(|s| value_to_string_opt(&s.leechers)),
+                    seeders: item
+                        .status
+                        .as_ref()
+                        .and_then(|s| value_to_string_opt(&s.seeders)),
+                    leechers: item
+                        .status
+                        .as_ref()
+                        .and_then(|s| value_to_string_opt(&s.leechers)),
                     category: item.category.as_ref().and_then(value_to_string),
                     discount: item
                         .status

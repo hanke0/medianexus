@@ -86,10 +86,7 @@ async fn wait_for_job(
 }
 
 /// Seconds until the next slot measured from local midnight.
-pub fn secs_until_next_midnight_slot(
-    interval_secs: u64,
-    now: chrono::DateTime<Local>,
-) -> u64 {
+pub fn secs_until_next_midnight_slot(interval_secs: u64, now: chrono::DateTime<Local>) -> u64 {
     let interval = interval_secs.max(60);
     let midnight = now
         .date_naive()
@@ -153,8 +150,7 @@ pub async fn run_download_tick(state: &AppState) -> Result<usize, crate::error::
 
 pub async fn run_library_scan_tick(state: &AppState) -> Result<(), crate::error::AppError> {
     tracing::info!("library-scan scheduler tick");
-    let (catalog, notes) =
-        crate::domain::maintenance::sync_library_catalog_inner(state).await?;
+    let (catalog, notes) = crate::domain::maintenance::sync_library_catalog_inner(state).await?;
     let scan_msgs = crate::domain::maintenance::trigger_media_scan_inner(state).await?;
     tracing::info!(
         catalog,
@@ -270,9 +266,7 @@ async fn search_and_submit(state: &AppState, t: &Track) -> Result<(), crate::err
                 &t.id,
                 "pending",
                 0.0,
-                Some(&format!(
-                    "PT 搜种失败：{e}；将在下个搜种周期重试"
-                )),
+                Some(&format!("PT 搜种失败：{e}；将在下个搜种周期重试")),
                 Some(&e.to_string()),
             )
             .await?;

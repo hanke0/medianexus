@@ -197,15 +197,7 @@ pub async fn trigger_track(state: &AppState, user: &AuthUser, id: &str) -> AppRe
         }
         // Re-queue searchable / failed items so the pipeline starts from search.
         "failed" | "pending" | "searching" => {
-            update_status(
-                &state.db,
-                id,
-                "pending",
-                0.0,
-                Some("已手动触发"),
-                None,
-            )
-            .await?;
+            update_status(&state.db, id, "pending", 0.0, Some("已手动触发"), None).await?;
         }
         _ => {}
     }
@@ -386,18 +378,12 @@ pub async fn fetch_download_queue(db: &sqlx::SqlitePool) -> AppResult<Vec<Track>
 }
 
 async fn fetch_by_statuses(db: &sqlx::SqlitePool, statuses: &[&str]) -> AppResult<Vec<Track>> {
-    let placeholders = statuses
-        .iter()
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT * FROM tracks WHERE status IN ({placeholders}) ORDER BY created_at ASC"
-    );
+    let placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql =
+        format!("SELECT * FROM tracks WHERE status IN ({placeholders}) ORDER BY created_at ASC");
     let mut q = sqlx::query_as::<_, Track>(&sql);
     for status in statuses {
         q = q.bind(*status);
     }
     Ok(q.fetch_all(db).await?)
 }
-

@@ -20,11 +20,7 @@ pub async fn connect(config: &Config) -> AppResult<SqlitePool> {
     for kind in ["movies", "tv"] {
         tokio::fs::create_dir_all(config.library_dir.join(kind))
             .await
-            .map_err(|e| {
-                AppError::Internal(format!(
-                    "failed to create library/{kind}: {e}"
-                ))
-            })?;
+            .map_err(|e| AppError::Internal(format!("failed to create library/{kind}: {e}")))?;
     }
 
     let connect_options = SqliteConnectOptions::from_str(&config.database_url)

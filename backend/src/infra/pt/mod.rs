@@ -115,7 +115,9 @@ impl PtRegistry {
             .find(|i| i.configured())
             .map(|i| i.as_ref())
             .ok_or_else(|| {
-                AppError::BadRequest("no PT site configured (set M-Team API key in settings)".into())
+                AppError::BadRequest(
+                    "no PT site configured (set M-Team API key in settings)".into(),
+                )
             })
     }
 

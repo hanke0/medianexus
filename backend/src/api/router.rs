@@ -49,7 +49,10 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::tracks::get_track).delete(handlers::tracks::delete_track),
         )
         .route("/tracks/{id}/cancel", post(handlers::tracks::cancel_track))
-        .route("/tracks/{id}/trigger", post(handlers::tracks::trigger_track))
+        .route(
+            "/tracks/{id}/trigger",
+            post(handlers::tracks::trigger_track),
+        )
         .route(
             "/settings",
             get(handlers::settings::get_settings).put(handlers::settings::update_settings),
