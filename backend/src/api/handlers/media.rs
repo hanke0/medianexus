@@ -1,6 +1,6 @@
 use crate::error::AppResult;
 use crate::infra::media_server::{self, LibraryPresence};
-use crate::infra::tmdb::MediaItem;
+use crate::infra::tmdb::{MediaItem, TvEpisode};
 use crate::state::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -145,6 +145,30 @@ pub async fn get_media(
         }
     };
     Ok(Json(item))
+}
+
+#[utoipa::path(
+    get,
+    path = "/media/tv/{tmdb_id}/seasons/{season_number}",
+    tag = "Media",
+    params(
+        ("tmdb_id" = i64, Path, description = "TMDB tv id"),
+        ("season_number" = i64, Path, description = "Season number (0 = specials)")
+    ),
+    responses((status = 200, body = [TvEpisode])),
+    security(("bearer_auth" = []))
+)]
+pub async fn tv_season(
+    State(state): State<AppState>,
+    Path((tmdb_id, season_number)): Path<(i64, i64)>,
+) -> AppResult<Json<Vec<TvEpisode>>> {
+    let episodes = state
+        .clients()
+        .await
+        .tmdb
+        .tv_season(tmdb_id, season_number)
+        .await?;
+    Ok(Json(episodes))
 }
 
 #[utoipa::path(

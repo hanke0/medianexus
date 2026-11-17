@@ -5,7 +5,7 @@ use crate::domain::settings::IntegrationSettings;
 use crate::domain::track::{CreateTrackRequest, Track};
 use crate::error::ApiErrorBody;
 use crate::infra::media_server::LibraryPresence;
-use crate::infra::tmdb::MediaItem;
+use crate::infra::tmdb::{MediaItem, TvEpisode, TvSeason};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
@@ -22,6 +22,7 @@ use utoipa::{Modify, OpenApi};
         handlers::media::list_movies,
         handlers::media::list_tv,
         handlers::media::get_media,
+        handlers::media::tv_season,
         handlers::media::library_presence,
         handlers::tracks::list_tracks,
         handlers::tracks::create_track,
@@ -49,6 +50,8 @@ use utoipa::{Modify, OpenApi};
         handlers::users::CreateUserRequest,
         handlers::health::HealthResponse,
         MediaItem,
+        TvSeason,
+        TvEpisode,
         Track,
         CreateTrackRequest,
         IntegrationSettings,

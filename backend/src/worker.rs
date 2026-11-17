@@ -189,51 +189,54 @@ async fn search_and_submit(state: &AppState, t: &Track) -> Result<(), crate::err
     let _ = crate::infra::plex::refresh_token_if_needed(&state.http, &state.db).await;
     let _ = state.reload_integrations().await;
 
-    // Re-check library before downloading (synced catalog + live Plex/Jellyfin).
-    let mut local = crate::domain::maintenance::find_in_local_catalog(
-        &state.db,
-        &t.media_type,
-        t.tmdb_id,
-        t.imdb_id.as_deref(),
-    )
-    .await?;
-    let settings = state.settings().await;
-    let mut presence = media_server::find_in_libraries(
-        &state.http,
-        &settings,
-        &t.media_type,
-        t.tmdb_id,
-        t.imdb_id.as_deref(),
-    )
-    .await?;
-    if !local.is_empty() {
-        presence.matches.append(&mut local);
-        presence.found = true;
-    }
-    if presence.found {
-        let detail = presence
-            .matches
-            .iter()
-            .map(|m| {
-                format!(
-                    "{}「{}」via {}",
-                    m.source,
-                    m.title,
-                    m.matched_by.to_uppercase()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-        track::update_status(
+    // Season tracks still search when the show is only partly in the library.
+    if t.season_number.is_none() {
+        // Re-check library before downloading (synced catalog + live Plex/Jellyfin).
+        let mut local = crate::domain::maintenance::find_in_local_catalog(
             &state.db,
-            &t.id,
-            "already_exists",
-            1.0,
-            Some(&format!("Already in library: {detail}")),
-            None,
+            &t.media_type,
+            t.tmdb_id,
+            t.imdb_id.as_deref(),
         )
         .await?;
-        return Ok(());
+        let settings = state.settings().await;
+        let mut presence = media_server::find_in_libraries(
+            &state.http,
+            &settings,
+            &t.media_type,
+            t.tmdb_id,
+            t.imdb_id.as_deref(),
+        )
+        .await?;
+        if !local.is_empty() {
+            presence.matches.append(&mut local);
+            presence.found = true;
+        }
+        if presence.found {
+            let detail = presence
+                .matches
+                .iter()
+                .map(|m| {
+                    format!(
+                        "{}「{}」via {}",
+                        m.source,
+                        m.title,
+                        m.matched_by.to_uppercase()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            track::update_status(
+                &state.db,
+                &t.id,
+                "already_exists",
+                1.0,
+                Some(&format!("Already in library: {detail}")),
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
     }
 
     track::update_status(
@@ -254,7 +257,7 @@ async fn search_and_submit(state: &AppState, t: &Track) -> Result<(), crate::err
         keyword: keyword.clone(),
         imdb_id: t.imdb_id.clone(),
         kind: crate::infra::pt::PtMediaKind::from_track_media_type(&t.media_type),
-        page_size: 30,
+        page_size: if t.season_number.is_some() { 50 } else { 30 },
     };
 
     let hits = match clients.pt.search(&query, preferred).await {
@@ -273,6 +276,10 @@ async fn search_and_submit(state: &AppState, t: &Track) -> Result<(), crate::err
             return Ok(());
         }
     };
+    if t.media_type == "tv" && t.season_number.is_some() {
+        return resolve_tv_season(state, t, &hits).await;
+    }
+
     let Some(best) = crate::infra::pt::pick_best_torrent(&hits) else {
         // Keep pending so the next search schedule can retry.
         track::update_status(
@@ -523,7 +530,15 @@ async fn do_hardlink(state: &AppState, t: &Track) -> Result<(), crate::error::Ap
         .config
         .library_dir
         .join(hardlink::library_kind_dir(&t.media_type));
-    let dest = hardlink::hardlink_media(&src, &dest_root, &folder).await?;
+    let dest = if t.media_type == "tv" {
+        if let Some(season) = t.season_number.and_then(|n| u32::try_from(n).ok()) {
+            hardlink::hardlink_tv_season(&src, &dest_root, &folder, season).await?
+        } else {
+            hardlink::hardlink_media(&src, &dest_root, &folder).await?
+        }
+    } else {
+        hardlink::hardlink_media(&src, &dest_root, &folder).await?
+    };
     track::set_hardlink_path(&state.db, &t.id, &dest.display().to_string()).await?;
 
     let refreshed = sqlx::query_as::<_, Track>("SELECT * FROM tracks WHERE id = ?")
@@ -543,18 +558,151 @@ async fn do_scan(state: &AppState, t: &Track) -> Result<(), crate::error::AppErr
 }
 
 fn build_keyword(t: &Track) -> String {
-    if let Some(orig) = &t.original_title {
-        if !orig.is_empty() {
-            return match &t.year {
-                Some(year) => format!("{orig} {year}"),
-                None => orig.clone(),
-            };
+    let base = t
+        .original_title
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(t.title.as_str());
+    if t.media_type == "tv" {
+        if let Some(season) = t.season_number {
+            let tag = crate::infra::tv_release::target_label(season, t.episode_number);
+            return format!("{base} {tag}");
         }
     }
     match &t.year {
-        Some(year) => format!("{} {year}", t.title),
-        None => t.title.clone(),
+        Some(year) if !year.is_empty() => format!("{base} {year}"),
+        _ => base.to_string(),
     }
+}
+
+async fn resolve_tv_season(
+    state: &AppState,
+    t: &Track,
+    hits: &[crate::infra::pt::PtTorrent],
+) -> Result<(), crate::error::AppError> {
+    use crate::infra::pt::PtTorrent;
+    use crate::infra::tv_release::TvReleaseKind;
+    use std::collections::BTreeMap;
+
+    let season_i = t.season_number.unwrap_or(0);
+    let season = u32::try_from(season_i).unwrap_or(0);
+    let episode = t.episode_number.and_then(|n| u32::try_from(n).ok());
+    let label = crate::infra::tv_release::target_label(season_i, t.episode_number);
+
+    let mut packs: Vec<&PtTorrent> = Vec::new();
+    let mut episodes: BTreeMap<u32, Vec<&PtTorrent>> = BTreeMap::new();
+    for hit in hits {
+        match crate::infra::tv_release::classify_release(&hit.name, season) {
+            Some(TvReleaseKind::SeasonPack) => packs.push(hit),
+            Some(TvReleaseKind::Episode(ep)) => episodes.entry(ep).or_default().push(hit),
+            None => {}
+        }
+    }
+
+    let best_pack = {
+        let owned: Vec<PtTorrent> = packs.iter().map(|h| (*h).clone()).collect();
+        crate::infra::pt::pick_best_torrent(&owned).cloned()
+    };
+
+    if let Some(ep) = episode {
+        if let Some(pack) = best_pack {
+            return commit_torrent(state, t, &pack).await;
+        }
+        if let Some(list) = episodes.get(&ep) {
+            let owned: Vec<PtTorrent> = list.iter().map(|h| (*h).clone()).collect();
+            if let Some(best) = crate::infra::pt::pick_best_torrent(&owned).cloned() {
+                return commit_torrent(state, t, &best).await;
+            }
+        }
+        return mark_tv_retry(state, t, &label).await;
+    }
+
+    if let Some(pack) = best_pack {
+        return commit_torrent(state, t, &pack).await;
+    }
+    if episodes.is_empty() {
+        return mark_tv_retry(state, t, &label).await;
+    }
+
+    let mut created = 0usize;
+    let mut existing = 0usize;
+    for (ep, list) in episodes {
+        let owned: Vec<PtTorrent> = list.iter().map(|h| (*h).clone()).collect();
+        let Some(best) = crate::infra::pt::pick_best_torrent(&owned).cloned() else {
+            continue;
+        };
+        let child = track::insert_episode_track(
+            &state.db,
+            t,
+            track::EpisodeTorrent {
+                episode_number: i64::from(ep),
+                site: &best.site,
+                torrent_id: &best.id,
+                torrent_name: &best.name,
+                torrent_size: Some(&best.size),
+            },
+        )
+        .await?;
+        match child {
+            Some(child) => {
+                created += 1;
+                if let Err(e) = submit_to_qb(state, &child).await {
+                    fail_track(state, &child, &e).await;
+                }
+            }
+            None => existing += 1,
+        }
+    }
+
+    let message = if created == 0 {
+        format!("未找到 {label} 全集，这些集已在追踪中（{existing}）")
+    } else {
+        format!("未找到 {label} 全集，已按集开始下载 {created} 集")
+    };
+    track::update_status(&state.db, &t.id, "completed", 1.0, Some(&message), None).await?;
+    Ok(())
+}
+
+async fn commit_torrent(
+    state: &AppState,
+    t: &Track,
+    best: &crate::infra::pt::PtTorrent,
+) -> Result<(), crate::error::AppError> {
+    track::set_torrent_info(
+        &state.db,
+        &t.id,
+        &best.site,
+        &best.id,
+        &best.name,
+        Some(&best.size),
+    )
+    .await?;
+
+    let refreshed = track::fetch_search_queue(&state.db)
+        .await?
+        .into_iter()
+        .find(|x| x.id == t.id)
+        .ok_or_else(|| crate::error::AppError::NotFound("track disappeared".into()))?;
+    submit_to_qb(state, &refreshed).await
+}
+
+async fn mark_tv_retry(
+    state: &AppState,
+    t: &Track,
+    label: &str,
+) -> Result<(), crate::error::AppError> {
+    track::update_status(
+        &state.db,
+        &t.id,
+        "pending",
+        0.0,
+        Some(&format!(
+            "未找到「{label}」的全集或单集；将在下个搜种周期重试"
+        )),
+        None,
+    )
+    .await?;
+    Ok(())
 }
 
 fn sanitize_filename(name: &str) -> String {

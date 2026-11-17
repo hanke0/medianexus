@@ -37,6 +37,28 @@ pub async fn hardlink_media(src: &Path, dest_root: &Path, folder_name: &str) -> 
     Ok(dest_dir)
 }
 
+/// TV layout: `{show}/{show}-S01/…`, keeping each file's original name.
+pub async fn hardlink_tv_season(
+    src: &Path,
+    library_tv_root: &Path,
+    show_folder: &str,
+    season: u32,
+) -> AppResult<PathBuf> {
+    let show = sanitize_name(show_folder);
+    let season_dir = library_tv_root
+        .join(&show)
+        .join(format!("{show}-S{season:02}"));
+    tokio::fs::create_dir_all(&season_dir).await?;
+
+    let src = src.to_path_buf();
+    let dest = season_dir.clone();
+    tokio::task::spawn_blocking(move || hardlink_recursive(&src, &dest))
+        .await
+        .map_err(|e| AppError::Internal(format!("hardlink task join: {e}")))??;
+
+    Ok(season_dir)
+}
+
 /// Render folder name from template, e.g. `{{title}}-{{year}}`.
 pub fn render_folder_name(template: &str, vars: &FolderNameVars<'_>) -> String {
     let year = vars.year.unwrap_or("");
@@ -193,5 +215,26 @@ mod tests {
         assert_eq!(library_kind_dir("movie"), "movies");
         assert_eq!(library_kind_dir("tv"), "tv");
         assert_eq!(library_kind_dir("other"), "tv");
+    }
+
+    #[tokio::test]
+    async fn tv_season_layout_keeps_original_names() {
+        let root = std::env::temp_dir().join(format!("mn-hl-{}", uuid::Uuid::new_v4()));
+        let src = root.join("torrent");
+        let lib = root.join("tv");
+        std::fs::create_dir_all(src.join("nested")).unwrap();
+        std::fs::write(src.join("nested").join("Show.S01E01.1080p.mkv"), b"a").unwrap();
+        std::fs::write(src.join("episode.mp4"), b"b").unwrap();
+        std::fs::write(src.join("notes.txt"), b"skip").unwrap();
+
+        let dest = hardlink_tv_season(&src, &lib, "TvShowName", 1)
+            .await
+            .unwrap();
+        assert_eq!(dest, lib.join("TvShowName").join("TvShowName-S01"));
+        assert!(dest.join("nested").join("Show.S01E01.1080p.mkv").is_file());
+        assert!(dest.join("episode.mp4").is_file());
+        assert!(!dest.join("notes.txt").exists());
+        assert!(!dest.join("S01E01.mkv").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

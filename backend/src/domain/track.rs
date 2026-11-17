@@ -11,6 +11,10 @@ pub struct Track {
     pub user_id: String,
     pub media_type: String,
     pub tmdb_id: i64,
+    /// TV season. `None` for movies and legacy whole-show tracks.
+    pub season_number: Option<i64>,
+    /// Set when this row downloads one episode. `None` is a season pack (or a movie).
+    pub episode_number: Option<i64>,
     pub title: String,
     pub original_title: Option<String>,
     pub year: Option<String>,
@@ -36,6 +40,20 @@ pub struct Track {
 pub struct CreateTrackRequest {
     pub media_type: String,
     pub tmdb_id: i64,
+    /// Required for `tv`. Ignored for movies.
+    #[serde(default)]
+    pub season_number: Option<i64>,
+    /// Optional single episode inside `season_number`.
+    #[serde(default)]
+    pub episode_number: Option<i64>,
+}
+
+pub struct EpisodeTorrent<'a> {
+    pub episode_number: i64,
+    pub site: &'a str,
+    pub torrent_id: &'a str,
+    pub torrent_name: &'a str,
+    pub torrent_size: Option<&'a str>,
 }
 
 pub async fn list_for_user(state: &AppState, user: &AuthUser) -> AppResult<Vec<Track>> {
@@ -77,6 +95,27 @@ pub async fn create_track(
             "media_type must be movie or tv".into(),
         ));
     }
+    if req.media_type == "movie" && (req.season_number.is_some() || req.episode_number.is_some()) {
+        return Err(AppError::BadRequest("电影不按季或集追踪".into()));
+    }
+    if req.media_type == "tv" && req.season_number.is_none() {
+        return Err(AppError::BadRequest(
+            "电视剧需要指定季（season_number）".into(),
+        ));
+    }
+    if let Some(season) = req.season_number {
+        if season < 0 {
+            return Err(AppError::BadRequest("season_number 不能为负".into()));
+        }
+    }
+    if let Some(episode) = req.episode_number {
+        if req.season_number.is_none() {
+            return Err(AppError::BadRequest("按集追踪时必须同时指定季".into()));
+        }
+        if episode < 1 {
+            return Err(AppError::BadRequest("episode_number 必须 >= 1".into()));
+        }
+    }
 
     let clients = state.clients().await;
     let media = if req.media_type == "movie" {
@@ -85,34 +124,57 @@ pub async fn create_track(
         clients.tmdb.tv_details(req.tmdb_id).await?
     };
 
-    let mut local_matches = crate::domain::maintenance::find_in_local_catalog(
-        &state.db,
-        &req.media_type,
-        req.tmdb_id,
-        media.imdb_id.as_deref(),
-    )
-    .await
-    .unwrap_or_default();
-
-    let settings = state.settings().await;
-    let mut presence = crate::infra::media_server::find_in_libraries(
-        &state.http,
-        &settings,
-        &req.media_type,
-        req.tmdb_id,
-        media.imdb_id.as_deref(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        tracing::warn!("library presence check failed: {e}");
-        crate::infra::media_server::LibraryPresence {
-            found: false,
-            matches: Vec::new(),
+    if req.media_type == "tv" {
+        let season = req.season_number.expect("tv season checked");
+        if !media.seasons.is_empty() && !media.seasons.iter().any(|s| s.season_number == season) {
+            return Err(AppError::BadRequest(format!("没有第 {season} 季")));
         }
-    });
-    if !local_matches.is_empty() {
-        presence.matches.append(&mut local_matches);
-        presence.found = true;
+        if let Some(episode) = req.episode_number {
+            if let Some(info) = media.seasons.iter().find(|s| s.season_number == season) {
+                if info.episode_count > 0 && episode > info.episode_count {
+                    return Err(AppError::BadRequest(format!(
+                        "第 {season} 季没有第 {episode} 集"
+                    )));
+                }
+            }
+        }
+    }
+
+    // A season can be missing even when the show is already in the library.
+    let mut presence = crate::infra::media_server::LibraryPresence {
+        found: false,
+        matches: Vec::new(),
+    };
+    if req.season_number.is_none() {
+        let mut local_matches = crate::domain::maintenance::find_in_local_catalog(
+            &state.db,
+            &req.media_type,
+            req.tmdb_id,
+            media.imdb_id.as_deref(),
+        )
+        .await
+        .unwrap_or_default();
+
+        let settings = state.settings().await;
+        presence = crate::infra::media_server::find_in_libraries(
+            &state.http,
+            &settings,
+            &req.media_type,
+            req.tmdb_id,
+            media.imdb_id.as_deref(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("library presence check failed: {e}");
+            crate::infra::media_server::LibraryPresence {
+                found: false,
+                matches: Vec::new(),
+            }
+        });
+        if !local_matches.is_empty() {
+            presence.matches.append(&mut local_matches);
+            presence.found = true;
+        }
     }
 
     let (status, progress, status_message) = if presence.found {
@@ -135,22 +197,35 @@ pub async fn create_track(
             format!("Already in library: {detail}"),
         )
     } else {
-        ("pending", 0.0_f64, "Queued for automation".into())
+        (
+            "pending",
+            0.0_f64,
+            match req.season_number {
+                Some(season) => format!(
+                    "已加入队列 · {}",
+                    crate::infra::tv_release::target_label(season, req.episode_number)
+                ),
+                None => "Queued for automation".into(),
+            },
+        )
     };
 
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         r#"
         INSERT INTO tracks (
-            id, user_id, media_type, tmdb_id, title, original_title, year,
+            id, user_id, media_type, tmdb_id, season_number, episode_number,
+            title, original_title, year,
             poster_path, overview, imdb_id, status, progress, status_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&id)
     .bind(user.id.to_string())
     .bind(&req.media_type)
     .bind(req.tmdb_id)
+    .bind(req.season_number)
+    .bind(req.episode_number)
     .bind(&media.title)
     .bind(&media.original_title)
     .bind(&media.year)
@@ -165,7 +240,7 @@ pub async fn create_track(
     .map_err(|e| {
         if let sqlx::Error::Database(db) = &e {
             if db.message().contains("UNIQUE") {
-                return AppError::Conflict("already tracking this title".into());
+                return AppError::Conflict("已经在追踪这一部、这一季或这一集".into());
             }
         }
         AppError::from(e)
@@ -214,26 +289,82 @@ pub async fn find_for_media(
     user: &AuthUser,
     media_type: &str,
     tmdb_id: i64,
-) -> AppResult<Option<Track>> {
-    let track = if user.is_admin() {
+) -> AppResult<Vec<Track>> {
+    let tracks = if user.is_admin() {
         sqlx::query_as::<_, Track>(
-            "SELECT * FROM tracks WHERE media_type = ? AND tmdb_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM tracks WHERE media_type = ? AND tmdb_id = ? ORDER BY season_number, episode_number, created_at",
         )
         .bind(media_type)
         .bind(tmdb_id)
-        .fetch_optional(&state.db)
+        .fetch_all(&state.db)
         .await?
     } else {
         sqlx::query_as::<_, Track>(
-            "SELECT * FROM tracks WHERE user_id = ? AND media_type = ? AND tmdb_id = ? LIMIT 1",
+            "SELECT * FROM tracks WHERE user_id = ? AND media_type = ? AND tmdb_id = ? ORDER BY season_number, episode_number, created_at",
         )
         .bind(user.id.to_string())
         .bind(media_type)
         .bind(tmdb_id)
-        .fetch_optional(&state.db)
+        .fetch_all(&state.db)
         .await?
     };
-    Ok(track)
+    Ok(tracks)
+}
+
+/// Episode row already pointed at a chosen torrent. `Ok(None)` when that episode is tracked.
+pub async fn insert_episode_track(
+    db: &sqlx::SqlitePool,
+    parent: &Track,
+    ep: EpisodeTorrent<'_>,
+) -> AppResult<Option<Track>> {
+    let Some(season) = parent.season_number else {
+        return Err(AppError::Internal(
+            "episode follow-up requires a season".into(),
+        ));
+    };
+    let id = Uuid::new_v4().to_string();
+    let label = crate::infra::tv_release::target_label(season, Some(ep.episode_number));
+    let inserted = sqlx::query(
+        r#"
+        INSERT INTO tracks (
+            id, user_id, media_type, tmdb_id, season_number, episode_number,
+            title, original_title, year, poster_path, overview, imdb_id,
+            status, progress, status_message,
+            torrent_site, torrent_id, torrent_name, torrent_size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'torrent_found', 0.05, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(&parent.user_id)
+    .bind(&parent.media_type)
+    .bind(parent.tmdb_id)
+    .bind(season)
+    .bind(ep.episode_number)
+    .bind(&parent.title)
+    .bind(&parent.original_title)
+    .bind(&parent.year)
+    .bind(&parent.poster_path)
+    .bind(&parent.overview)
+    .bind(&parent.imdb_id)
+    .bind(format!("找到单集 {label}：{}", ep.torrent_name))
+    .bind(ep.site)
+    .bind(ep.torrent_id)
+    .bind(ep.torrent_name)
+    .bind(ep.torrent_size)
+    .execute(db)
+    .await;
+
+    match inserted {
+        Err(sqlx::Error::Database(db_err)) if db_err.message().contains("UNIQUE") => Ok(None),
+        Err(e) => Err(e.into()),
+        Ok(_) => {
+            let track = sqlx::query_as::<_, Track>("SELECT * FROM tracks WHERE id = ?")
+                .bind(&id)
+                .fetch_one(db)
+                .await?;
+            Ok(Some(track))
+        }
+    }
 }
 
 pub async fn delete_track(state: &AppState, user: &AuthUser, id: &str) -> AppResult<()> {

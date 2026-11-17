@@ -24,6 +24,25 @@ pub struct MediaItem {
     pub imdb_id: Option<String>,
     pub popularity: Option<f64>,
     pub vote_average: Option<f64>,
+    /// TV seasons from the detail endpoint. Empty for movies and list results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seasons: Vec<TvSeason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TvSeason {
+    pub season_number: i64,
+    pub name: String,
+    pub episode_count: i64,
+    pub poster_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TvEpisode {
+    pub episode_number: i64,
+    pub name: String,
+    pub overview: Option<String>,
+    pub still_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +72,29 @@ struct TmdbTv {
     overview: Option<String>,
     popularity: Option<f64>,
     vote_average: Option<f64>,
+    #[serde(default)]
+    seasons: Vec<TmdbSeason>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbSeason {
+    season_number: i64,
+    name: Option<String>,
+    episode_count: Option<i64>,
+    poster_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbSeasonDetail {
+    episodes: Vec<TmdbEpisodeRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbEpisodeRaw {
+    episode_number: i64,
+    name: Option<String>,
+    overview: Option<String>,
+    still_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +165,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: m.popularity,
                 vote_average: m.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -159,6 +202,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: t.popularity,
                 vote_average: t.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -195,6 +239,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: m.popularity,
                 vote_average: m.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -231,6 +276,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: t.popularity,
                 vote_average: t.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -269,6 +315,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: m.popularity,
                 vote_average: m.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -307,6 +354,7 @@ impl TmdbClient {
                 imdb_id: None,
                 popularity: t.popularity,
                 vote_average: t.vote_average,
+                seasons: Vec::new(),
             })
             .collect())
     }
@@ -367,6 +415,7 @@ impl TmdbClient {
             imdb_id: imdb,
             popularity: m.popularity,
             vote_average: m.vote_average,
+            seasons: Vec::new(),
         })
     }
 
@@ -399,7 +448,41 @@ impl TmdbClient {
             imdb_id: imdb,
             popularity: t.popularity,
             vote_average: t.vote_average,
+            seasons: map_seasons(t.seasons),
         })
+    }
+
+    pub async fn tv_season(&self, tmdb_id: i64, season_number: i64) -> AppResult<Vec<TvEpisode>> {
+        self.ensure_key()?;
+        if season_number < 0 {
+            return Err(AppError::BadRequest("season_number must be >= 0".into()));
+        }
+        let url = format!("{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}");
+        let detail: TmdbSeasonDetail = self
+            .http
+            .get(&url)
+            .query(&[
+                ("api_key", self.api_key.as_str()),
+                ("language", self.lang()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(detail
+            .episodes
+            .into_iter()
+            .map(|e| TvEpisode {
+                episode_number: e.episode_number,
+                name: e
+                    .name
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or_else(|| format!("第 {} 集", e.episode_number)),
+                overview: e.overview,
+                still_url: poster_url(e.still_path.as_deref()),
+            })
+            .collect())
     }
 
     async fn external_ids(&self, kind: &str, tmdb_id: i64) -> AppResult<Option<String>> {
@@ -415,6 +498,32 @@ impl TmdbClient {
             .await?;
         Ok(ids.imdb_id.filter(|s| !s.is_empty()))
     }
+}
+
+fn map_seasons(seasons: Vec<TmdbSeason>) -> Vec<TvSeason> {
+    let mut out: Vec<TvSeason> = seasons
+        .into_iter()
+        .map(|s| {
+            let n = s.season_number;
+            TvSeason {
+                season_number: n,
+                name: s
+                    .name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        if n == 0 {
+                            "特别篇".into()
+                        } else {
+                            format!("第 {n} 季")
+                        }
+                    }),
+                episode_count: s.episode_count.unwrap_or(0),
+                poster_url: poster_url(s.poster_path.as_deref()),
+            }
+        })
+        .collect();
+    out.sort_by_key(|s| s.season_number);
+    out
 }
 
 fn year_from_date(date: Option<&str>) -> Option<String> {

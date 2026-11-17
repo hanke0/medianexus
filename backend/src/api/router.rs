@@ -29,6 +29,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/media/movies", get(handlers::media::list_movies))
         .route("/media/tv", get(handlers::media::list_tv))
         .route(
+            "/media/tv/{tmdb_id}/seasons/{season_number}",
+            get(handlers::media::tv_season),
+        )
+        .route(
             "/media/{media_type}/{tmdb_id}/library",
             get(handlers::media::library_presence),
         )

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
 import { useToast } from "@/components/Toast";
 import { ApiError, endpoints, type MediaItem } from "@/lib/api";
@@ -15,6 +16,7 @@ export function BrowsePage() {
   const [searchInput, setSearchInput] = useState("");
   const [queryText, setQueryText] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const searching = queryText.trim().length > 0;
@@ -153,7 +155,14 @@ export function BrowsePage() {
           <MediaCard
             key={`${item.media_type}-${item.tmdb_id}`}
             item={item}
-            onTrack={(it) => trackMutation.mutate(it)}
+            actionLabel={item.media_type === "tv" ? "按季" : undefined}
+            onTrack={(it) => {
+              if (it.media_type === "tv") {
+                navigate(`/media/tv/${it.tmdb_id}`);
+                return;
+              }
+              trackMutation.mutate(it);
+            }}
             tracking={
               trackMutation.isPending &&
               trackMutation.variables?.tmdb_id === item.tmdb_id &&

@@ -7,9 +7,10 @@ type Props = {
   onTrack: (item: MediaItem) => void;
   tracking?: boolean;
   disabled?: boolean;
+  actionLabel?: string;
 };
 
-export function MediaCard({ item, onTrack, tracking, disabled }: Props) {
+export function MediaCard({ item, onTrack, tracking, disabled, actionLabel }: Props) {
   const to = `/media/${item.media_type}/${item.tmdb_id}`;
 
   return (
@@ -31,7 +32,7 @@ export function MediaCard({ item, onTrack, tracking, disabled }: Props) {
               onTrack(item);
             }}
           >
-            {tracking ? "追踪中…" : "追踪"}
+            {tracking ? "追踪中…" : actionLabel ?? "追踪"}
           </button>
         </div>
       </Link>

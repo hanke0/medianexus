@@ -94,14 +94,14 @@ pub async fn trigger_track(
         ("media_type" = String, Path, description = "movie | tv"),
         ("tmdb_id" = i64, Path, description = "TMDB id")
     ),
-    responses((status = 200, body = Option<Track>)),
+    responses((status = 200, body = [Track])),
     security(("bearer_auth" = []))
 )]
 pub async fn find_track_by_media(
     State(state): State<AppState>,
     Extension(AuthContext(user)): Extension<AuthContext>,
     Path((media_type, tmdb_id)): Path<(String, i64)>,
-) -> AppResult<Json<Option<Track>>> {
+) -> AppResult<Json<Vec<Track>>> {
     Ok(Json(
         track::find_for_media(&state, &user, &media_type, tmdb_id).await?,
     ))

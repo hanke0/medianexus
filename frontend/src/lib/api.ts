@@ -68,6 +68,21 @@ export type MediaItem = {
   imdb_id?: string | null;
   popularity?: number | null;
   vote_average?: number | null;
+  seasons?: TvSeason[];
+};
+
+export type TvSeason = {
+  season_number: number;
+  name: string;
+  episode_count: number;
+  poster_url?: string | null;
+};
+
+export type TvEpisode = {
+  episode_number: number;
+  name: string;
+  overview?: string | null;
+  still_url?: string | null;
 };
 
 export type LibraryMatch = {
@@ -113,6 +128,8 @@ export type Track = {
   user_id: string;
   media_type: string;
   tmdb_id: number;
+  season_number?: number | null;
+  episode_number?: number | null;
   title: string;
   original_title?: string | null;
   year?: string | null;
@@ -212,20 +229,26 @@ export const endpoints = {
     ),
   mediaDetail: (media_type: string, tmdb_id: number) =>
     api<MediaItem>(`/media/${media_type}/${tmdb_id}`),
+  tvSeason: (tmdb_id: number, season_number: number) =>
+    api<TvEpisode[]>(`/media/tv/${tmdb_id}/seasons/${season_number}`),
   mediaLibrary: (media_type: string, tmdb_id: number) =>
     api<LibraryPresence>(`/media/${media_type}/${tmdb_id}/library`),
   tracks: () => api<Track[]>("/tracks"),
-  createTrack: (media_type: string, tmdb_id: number) =>
+  createTrack: (
+    media_type: string,
+    tmdb_id: number,
+    target?: { season_number?: number; episode_number?: number },
+  ) =>
     api<Track>("/tracks", {
       method: "POST",
-      body: JSON.stringify({ media_type, tmdb_id }),
+      body: JSON.stringify({ media_type, tmdb_id, ...target }),
     }),
   cancelTrack: (id: string) =>
     api<Track>(`/tracks/${id}/cancel`, { method: "POST" }),
   triggerTrack: (id: string) =>
     api<Track>(`/tracks/${id}/trigger`, { method: "POST" }),
   trackByMedia: (media_type: string, tmdb_id: number) =>
-    api<Track | null>(`/tracks/by-media/${media_type}/${tmdb_id}`),
+    api<Track[]>(`/tracks/by-media/${media_type}/${tmdb_id}`),
   deleteTrack: (id: string) =>
     api<void>(`/tracks/${id}`, { method: "DELETE" }),
   users: () => api<UserDto[]>("/users"),

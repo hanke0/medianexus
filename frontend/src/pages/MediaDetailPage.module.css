@@ -98,6 +98,57 @@
   margin-top: 0.35rem;
 }
 
+.seasons {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.seasonTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.season {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(18, 24, 33, 0.45);
+}
+
+.seasonHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.seasonHead .actions {
+  margin-top: 0;
+}
+
+.episodes {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.episode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.92rem;
+}
+
 .ok {
   margin: 0;
   color: var(--ok);

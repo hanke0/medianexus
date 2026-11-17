@@ -146,6 +146,12 @@ function TrackRow({
         </div>
         <p className={styles.meta}>
           {track.media_type === "tv" ? "电视剧" : "电影"}
+          {track.season_number != null &&
+            ` · S${String(track.season_number).padStart(2, "0")}${
+              track.episode_number != null
+                ? `E${String(track.episode_number).padStart(2, "0")}`
+                : ""
+            }`}
           {track.year ? ` · ${track.year}` : ""}
           {track.torrent_site ? ` · ${track.torrent_site}` : ""}
           {track.torrent_name ? ` · ${track.torrent_name}` : ""}
