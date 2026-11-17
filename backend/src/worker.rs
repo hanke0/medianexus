@@ -333,30 +333,52 @@ async fn submit_to_qb(state: &AppState, t: &Track) -> Result<(), crate::error::A
 
     let clients = state.clients().await;
     let bytes = clients.pt.download(torrent_site, torrent_id).await?;
+    let hashes = crate::infra::torrent_meta::info_hashes(&bytes)?;
     let filename = format!("{}.torrent", sanitize_filename(&torrent_name));
-    clients.qb.add_torrent_file(&filename, bytes).await?;
+    let accepted = clients.qb.add_torrent_file(&filename, bytes).await?;
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let info = clients
-        .qb
-        .torrent_by_name_hint(&torrent_name)
-        .await?
-        .or(clients.qb.torrent_by_name_hint(t.title.as_str()).await?);
+    let mut found = None;
+    for attempt in 0..5 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        found = find_by_hashes(&clients.qb, &hashes).await?;
+        if found.is_some() {
+            break;
+        }
+    }
 
-    if let Some(info) = info {
-        let path = if info.content_path.is_empty() {
+    let hash = found
+        .as_ref()
+        .map(|info| info.hash.clone())
+        .unwrap_or_else(|| hashes.preferred().to_string());
+    if hash.is_empty() {
+        return Err(crate::error::AppError::Internal(
+            "torrent file has no info hash".into(),
+        ));
+    }
+    let path = found.as_ref().and_then(|info| {
+        if info.content_path.is_empty() {
             None
         } else {
             Some(info.content_path.as_str())
-        };
-        track::set_download_info(&state.db, &t.id, &info.hash, path, info.progress).await?;
-    } else {
+        }
+    });
+    let progress = found.as_ref().map(|info| info.progress).unwrap_or(0.0);
+    track::set_download_info(&state.db, &t.id, &hash, path, progress).await?;
+
+    if found.is_none() && !accepted {
+        return Err(crate::error::AppError::Internal(format!(
+            "qBittorrent rejected the torrent and hash {hash} is not in the client"
+        )));
+    }
+    if found.is_none() {
         track::update_status(
             &state.db,
             &t.id,
             "downloading",
             0.08,
-            Some("Torrent added to qBittorrent; waiting for metadata…"),
+            Some("Torrent added; waiting for qBittorrent to list it…"),
             None,
         )
         .await?;
@@ -364,15 +386,44 @@ async fn submit_to_qb(state: &AppState, t: &Track) -> Result<(), crate::error::A
     Ok(())
 }
 
+async fn find_by_hashes(
+    qb: &crate::infra::qbittorrent::QbittorrentClient,
+    hashes: &crate::infra::torrent_meta::InfoHashes,
+) -> Result<Option<crate::infra::qbittorrent::TorrentInfo>, crate::error::AppError> {
+    for hash in hashes.candidates() {
+        if let Some(info) = qb.torrent_by_hash(hash).await? {
+            return Ok(Some(info));
+        }
+    }
+    Ok(None)
+}
+
 async fn poll_download(state: &AppState, t: &Track) -> Result<(), crate::error::AppError> {
+    // Older rows never stored an info-hash, so name matching could miss forever.
+    let t = if t.torrent_hash.is_none() && t.torrent_id.is_some() {
+        submit_to_qb(state, t).await?;
+        sqlx::query_as::<_, Track>("SELECT * FROM tracks WHERE id = ?")
+            .bind(&t.id)
+            .fetch_one(&state.db)
+            .await?
+    } else {
+        t.clone()
+    };
+
     let qb = state.clients().await.qb;
-    let info = if let Some(hash) = t.torrent_hash.as_deref() {
+    let mut info = if let Some(hash) = t.torrent_hash.as_deref() {
         qb.torrent_by_hash(hash).await?
-    } else if let Some(name) = t.torrent_name.as_deref() {
-        qb.torrent_by_name_hint(name).await?
     } else {
         None
     };
+    if info.is_none() && t.torrent_hash.is_none() {
+        if let Some(name) = t.torrent_name.as_deref() {
+            info = qb.torrent_by_name_hint(name).await?;
+        }
+        if info.is_none() {
+            info = qb.torrent_by_name_hint(t.title.as_str()).await?;
+        }
+    }
 
     let Some(info) = info else {
         track::update_status(

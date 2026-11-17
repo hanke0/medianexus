@@ -5,3 +5,4 @@ pub mod plex;
 pub mod pt;
 pub mod qbittorrent;
 pub mod tmdb;
+pub mod torrent_meta;

@@ -38,6 +38,7 @@ rust-embed = { version = "8", optional = true }
 mime_guess = { version = "2", optional = true }
 ed25519-dalek = { version = "3.0.0", features = ["rand_core"] }
 base64 = "0.23.1"
+sha1 = "0.10"
 sha2 = "0.11.1"
 getrandom = { version = "0.4.3", features = ["std"] }
 if-addrs = "0.14"

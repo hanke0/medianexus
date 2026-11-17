@@ -127,7 +127,9 @@ impl QbittorrentClient {
         Ok(())
     }
 
-    pub async fn add_torrent_file(&self, filename: &str, bytes: Vec<u8>) -> AppResult<()> {
+    /// `Ok(true)` when qBittorrent accepted the torrent. `Ok(false)` is the
+    /// `Fails.` response, usually a duplicate already in the client.
+    pub async fn add_torrent_file(&self, filename: &str, bytes: Vec<u8>) -> AppResult<bool> {
         self.ensure_login().await?;
         self.ensure_category().await?;
 
@@ -155,17 +157,22 @@ impl QbittorrentClient {
         }
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if !status.is_success() || (text != "Ok." && !text.is_empty() && text != "Fails.") {
-            // "Fails." can mean duplicate — treat carefully
-            if text.contains("Fails") {
-                tracing::warn!("qBittorrent add returned Fails. (maybe duplicate)");
-                return Ok(());
-            }
+        let text = text.trim();
+        if !status.is_success() {
             return Err(AppError::Internal(format!(
                 "qBittorrent add failed ({status}): {text}"
             )));
         }
-        Ok(())
+        if text == "Ok." || text.is_empty() {
+            return Ok(true);
+        }
+        if text == "Fails." {
+            tracing::warn!("qBittorrent add returned Fails. (maybe duplicate)");
+            return Ok(false);
+        }
+        Err(AppError::Internal(format!(
+            "qBittorrent add failed ({status}): {text}"
+        )))
     }
 
     pub async fn torrent_by_name_hint(&self, name_hint: &str) -> AppResult<Option<TorrentInfo>> {
