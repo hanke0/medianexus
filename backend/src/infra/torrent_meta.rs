@@ -97,7 +97,10 @@ fn parse_int(token: &[u8]) -> Option<i64> {
     if token.first() != Some(&b'i') || token.last() != Some(&b'e') || token.len() < 3 {
         return None;
     }
-    std::str::from_utf8(&token[1..token.len() - 1]).ok()?.parse().ok()
+    std::str::from_utf8(&token[1..token.len() - 1])
+        .ok()?
+        .parse()
+        .ok()
 }
 
 fn skip(data: &[u8], i: &mut usize) -> Result<(), String> {
@@ -145,7 +148,9 @@ fn decode_str(token: &[u8]) -> Result<String, String> {
         .map_err(|_| "bad string length")?
         .parse()
         .map_err(|_| "bad string length")?;
-    let bytes = token.get(colon + 1..colon + 1 + len).ok_or("truncated string")?;
+    let bytes = token
+        .get(colon + 1..colon + 1 + len)
+        .ok_or("truncated string")?;
     String::from_utf8(bytes.to_vec()).map_err(|_| "info key is not utf-8".into())
 }
 
@@ -174,7 +179,8 @@ mod tests {
     use super::*;
 
     fn v1_torrent() -> Vec<u8> {
-        let info = b"d6:lengthi1e4:name4:test12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae";
+        let info =
+            b"d6:lengthi1e4:name4:test12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae";
         let mut torrent = b"d8:announce9:http://x/4:info".to_vec();
         torrent.extend_from_slice(info);
         torrent.push(b'e');
