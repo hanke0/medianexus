@@ -1,7 +1,24 @@
 import { Link } from "react-router-dom";
-import { RatingBadges } from "@/components/RatingBadges";
 import type { MediaItem } from "@/lib/api";
 import styles from "./MediaCard.module.css";
+
+function CardScores({ item }: { item: MediaItem }) {
+  const scores = [
+    item.imdb_rating != null ? `IMDb ${item.imdb_rating.toFixed(1)}` : null,
+    item.rt_rating != null ? `RT ${Math.round(item.rt_rating)}` : null,
+    item.vote_average != null ? `TMDB ${item.vote_average.toFixed(1)}` : null,
+  ].filter((score): score is string => score != null);
+
+  if (scores.length === 0) return null;
+
+  return (
+    <p className={styles.scores}>
+      {scores.map((score) => (
+        <span key={score}>{score}</span>
+      ))}
+    </p>
+  );
+}
 
 type Props = {
   item: MediaItem;
@@ -41,11 +58,8 @@ export function MediaCard({ item, onTrack, tracking, disabled, actionLabel }: Pr
         <h3>
           <Link to={to}>{item.title}</Link>
         </h3>
-        <p>
-          <span className="badge">{item.media_type === "tv" ? "电视剧" : "电影"}</span>
-          {item.year && <span className="badge">{item.year}</span>}
-          <RatingBadges item={item} />
-        </p>
+        {item.year ? <p className={styles.facts}>{item.year}</p> : null}
+        <CardScores item={item} />
       </div>
     </article>
   );
