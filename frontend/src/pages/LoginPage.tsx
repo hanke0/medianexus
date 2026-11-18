@@ -29,9 +29,7 @@ export function LoginPage() {
   return (
     <div className={styles.page}>
       <div className={styles.hero}>
-        <p className={styles.eyebrow}>TMDB · M-Team · qBittorrent</p>
         <h1>MediaNexus</h1>
-        <p className={styles.sub}>一点追踪，自动搜种、下载、入库。</p>
       </div>
       <form className={styles.form} onSubmit={handleSubmit}>
         <label className="field">
