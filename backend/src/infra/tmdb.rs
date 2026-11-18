@@ -134,8 +134,12 @@ impl TmdbClient {
         Ok(())
     }
 
-    fn lang(&self) -> &str {
+    pub fn language(&self) -> &str {
         &self.language
+    }
+
+    fn lang(&self) -> &str {
+        self.language()
     }
 
     pub async fn latest_movies(&self, page: u32) -> AppResult<Vec<MediaItem>> {

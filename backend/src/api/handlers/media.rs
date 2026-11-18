@@ -115,24 +115,48 @@ pub async fn list_tv(
 
 async fn browse(state: &AppState, media_type: &str, q: BrowseQuery) -> AppResult<Vec<MediaItem>> {
     let page = q.page.max(1);
-    let clients = state.clients().await;
-    let items = match q.source.as_str() {
-        "" | "tmdb" => tmdb_list(&clients.tmdb, media_type, &q.kind, page).await?,
-        "imdb" | "rt" => {
-            let mut items = clients
-                .mdblist
-                .chart(media_type, &q.source, &q.kind, page)
-                .await?;
-            clients.tmdb.localize_cards(&mut items).await;
-            items
-        }
+    let source = match q.source.as_str() {
+        "" | "tmdb" => "tmdb",
+        "imdb" => "imdb",
+        "rt" => "rt",
         _ => {
             return Err(crate::error::AppError::BadRequest(
                 "source must be tmdb, imdb, or rt".into(),
             ))
         }
     };
-    Ok(with_ratings(state, items).await)
+    let clients = state.clients().await;
+    let key = format!(
+        "{media_type}|{source}|{}|{page}|{}",
+        q.kind,
+        clients.tmdb.language()
+    );
+    let ttl = browse_ttl(&q.kind);
+    if let Some(items) = state.cached_browse(&key, ttl).await {
+        return Ok(items);
+    }
+    let items = match source {
+        "tmdb" => tmdb_list(&clients.tmdb, media_type, &q.kind, page).await?,
+        _ => {
+            let mut items = clients
+                .mdblist
+                .chart(media_type, source, &q.kind, page)
+                .await?;
+            clients.tmdb.localize_cards(&mut items).await;
+            items
+        }
+    };
+    let items = with_ratings(state, items).await;
+    state.remember_browse(key, items.clone()).await;
+    Ok(items)
+}
+
+fn browse_ttl(kind: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(match kind {
+        "top" => 3 * 60 * 60,
+        "popular" => 30 * 60,
+        _ => 15 * 60,
+    })
 }
 
 async fn tmdb_list(
