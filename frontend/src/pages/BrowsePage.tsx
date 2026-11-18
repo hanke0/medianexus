@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
 import { useToast } from "@/components/Toast";
@@ -7,24 +7,13 @@ import { ApiError, endpoints, type MediaItem } from "@/lib/api";
 import styles from "./BrowsePage.module.css";
 
 type Tab = "movies" | "tv";
-type Kind = "latest" | "popular";
-type Sort = "default" | "imdb" | "rt";
-
-function byRating(pick: (item: MediaItem) => number | null | undefined) {
-  return (a: MediaItem, b: MediaItem) => {
-    const left = pick(a);
-    const right = pick(b);
-    if (left == null && right == null) return 0;
-    if (left == null) return 1;
-    if (right == null) return -1;
-    return right - left;
-  };
-}
+type Kind = "latest" | "popular" | "top";
+type Source = "tmdb" | "imdb" | "rt";
 
 export function BrowsePage() {
   const [tab, setTab] = useState<Tab>("movies");
   const [kind, setKind] = useState<Kind>("latest");
-  const [sort, setSort] = useState<Sort>("default");
+  const [source, setSource] = useState<Source>("tmdb");
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [queryText, setQueryText] = useState("");
@@ -38,13 +27,13 @@ export function BrowsePage() {
   const query = useQuery({
     queryKey: searching
       ? ["media-search", searchType, queryText, page]
-      : ["media", tab, kind, page],
+      : ["media", tab, kind, source, page],
     queryFn: () =>
       searching
         ? endpoints.searchMedia(queryText.trim(), page, searchType)
         : tab === "movies"
-          ? endpoints.movies(page, kind)
-          : endpoints.tv(page, kind),
+          ? endpoints.movies(page, kind, source)
+          : endpoints.tv(page, kind, source),
   });
 
   const trackMutation = useMutation({
@@ -65,12 +54,7 @@ export function BrowsePage() {
     },
   });
 
-  const items = useMemo(() => {
-    const list = [...(query.data ?? [])];
-    if (sort === "imdb") list.sort(byRating((item) => item.imdb_rating));
-    if (sort === "rt") list.sort(byRating((item) => item.rt_rating));
-    return list;
-  }, [query.data, sort]);
+  const items = query.data ?? [];
 
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
@@ -128,52 +112,73 @@ export function BrowsePage() {
         </div>
         <div className={styles.tools}>
           {!searching && (
-            <div className={styles.tabs}>
-              <button
-                type="button"
-                className={kind === "latest" ? styles.active : undefined}
-                onClick={() => {
-                  setKind("latest");
-                  setPage(1);
-                }}
-              >
-                最新
-              </button>
-              <button
-                type="button"
-                className={kind === "popular" ? styles.active : undefined}
-                onClick={() => {
-                  setKind("popular");
-                  setPage(1);
-                }}
-              >
-                热门
-              </button>
-            </div>
+            <>
+              <div className={styles.tabs} aria-label="排序">
+                <button
+                  type="button"
+                  className={kind === "latest" ? styles.active : undefined}
+                  onClick={() => {
+                    setKind("latest");
+                    setPage(1);
+                  }}
+                >
+                  最新
+                </button>
+                <button
+                  type="button"
+                  className={kind === "popular" ? styles.active : undefined}
+                  onClick={() => {
+                    setKind("popular");
+                    setPage(1);
+                  }}
+                >
+                  最热
+                </button>
+                <button
+                  type="button"
+                  className={kind === "top" ? styles.active : undefined}
+                  onClick={() => {
+                    setKind("top");
+                    setPage(1);
+                  }}
+                >
+                  高分
+                </button>
+              </div>
+              <div className={styles.tabs} aria-label="数据来源">
+                <button
+                  type="button"
+                  className={source === "tmdb" ? styles.active : undefined}
+                  onClick={() => {
+                    setSource("tmdb");
+                    setPage(1);
+                  }}
+                >
+                  TMDB
+                </button>
+                <button
+                  type="button"
+                  className={source === "imdb" ? styles.active : undefined}
+                  onClick={() => {
+                    setSource("imdb");
+                    setPage(1);
+                  }}
+                >
+                  IMDb
+                </button>
+                <button
+                  type="button"
+                  className={source === "rt" ? styles.active : undefined}
+                  onClick={() => {
+                    setSource("rt");
+                    setPage(1);
+                  }}
+                >
+                  烂番茄
+                </button>
+              </div>
+            </>
           )}
-          <div className={styles.tabs} aria-label="评分排序">
-            <button
-              type="button"
-              className={sort === "default" ? styles.active : undefined}
-              onClick={() => setSort("default")}
-            >
-              默认
-            </button>
-            <button
-              type="button"
-              className={sort === "imdb" ? styles.active : undefined}
-              onClick={() => setSort("imdb")}
-            >
-              IMDb
-            </button>
-            <button
-              type="button"
-              className={sort === "rt" ? styles.active : undefined}
-              onClick={() => setSort("rt")}
-            >
-              烂番茄
-            </button>
-          </div>
         </div>
       </div>
 

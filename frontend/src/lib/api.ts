@@ -225,10 +225,10 @@ export const endpoints = {
       { method: "POST", body: JSON.stringify({ username, password }) },
     ),
   me: () => api<{ id: string; username: string; role: string }>("/auth/me"),
-  movies: (page = 1, kind = "latest") =>
-    api<MediaItem[]>(`/media/movies?page=${page}&kind=${kind}`),
-  tv: (page = 1, kind = "latest") =>
-    api<MediaItem[]>(`/media/tv?page=${page}&kind=${kind}`),
+  movies: (page = 1, kind = "latest", source = "tmdb") =>
+    api<MediaItem[]>(`/media/movies?page=${page}&kind=${kind}&source=${source}`),
+  tv: (page = 1, kind = "latest", source = "tmdb") =>
+    api<MediaItem[]>(`/media/tv?page=${page}&kind=${kind}&source=${source}`),
   searchMedia: (q: string, page = 1, media_type: "movie" | "tv" | "all" = "all") =>
     api<MediaItem[]>(
       `/media/search?q=${encodeURIComponent(q)}&page=${page}&media_type=${media_type}`,

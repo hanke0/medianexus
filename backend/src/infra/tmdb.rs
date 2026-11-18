@@ -256,6 +256,178 @@ impl TmdbClient {
             .collect())
     }
 
+    pub async fn top_rated_movies(&self, page: u32) -> AppResult<Vec<MediaItem>> {
+        self.ensure_key()?;
+        let url = format!("{TMDB_BASE}/movie/top_rated");
+        let page = page.to_string();
+        let resp: TmdbPaged<TmdbMovie> = self
+            .http
+            .get(&url)
+            .query(&[
+                ("api_key", self.api_key.as_str()),
+                ("language", self.lang()),
+                ("page", page.as_str()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        Ok(resp
+            .results
+            .into_iter()
+            .map(|m| MediaItem {
+                media_type: "movie".into(),
+                tmdb_id: m.id,
+                title: m.title.unwrap_or_else(|| "Untitled".into()),
+                original_title: m.original_title,
+                year: year_from_date(m.release_date.as_deref()),
+                poster_url: poster_url(m.poster_path.as_deref()),
+                overview: m.overview,
+                imdb_id: None,
+                imdb_rating: None,
+                rt_rating: None,
+                popularity: m.popularity,
+                vote_average: m.vote_average,
+                seasons: Vec::new(),
+            })
+            .collect())
+    }
+
+    pub async fn top_rated_tv(&self, page: u32) -> AppResult<Vec<MediaItem>> {
+        self.ensure_key()?;
+        let url = format!("{TMDB_BASE}/tv/top_rated");
+        let page = page.to_string();
+        let resp: TmdbPaged<TmdbTv> = self
+            .http
+            .get(&url)
+            .query(&[
+                ("api_key", self.api_key.as_str()),
+                ("language", self.lang()),
+                ("page", page.as_str()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        Ok(resp
+            .results
+            .into_iter()
+            .map(|t| MediaItem {
+                media_type: "tv".into(),
+                tmdb_id: t.id,
+                title: t.name.unwrap_or_else(|| "Untitled".into()),
+                original_title: t.original_name,
+                year: year_from_date(t.first_air_date.as_deref()),
+                poster_url: poster_url(t.poster_path.as_deref()),
+                overview: t.overview,
+                imdb_id: None,
+                imdb_rating: None,
+                rt_rating: None,
+                popularity: t.popularity,
+                vote_average: t.vote_average,
+                seasons: Vec::new(),
+            })
+            .collect())
+    }
+
+    /// Replace list-card text and artwork with the configured TMDB language.
+    /// Ratings already on the item are kept.
+    pub async fn localize_cards(&self, items: &mut [MediaItem]) {
+        if self.ensure_key().is_err() || items.is_empty() {
+            return;
+        }
+        let jobs = items
+            .iter()
+            .map(|item| self.card(&item.media_type, item.tmdb_id));
+        let results = futures_util::future::join_all(jobs).await;
+        for (item, result) in items.iter_mut().zip(results) {
+            let Ok(card) = result else {
+                continue;
+            };
+            let imdb_rating = item.imdb_rating;
+            let rt_rating = item.rt_rating;
+            let imdb_id = item.imdb_id.clone();
+            *item = card;
+            item.imdb_rating = imdb_rating;
+            item.rt_rating = rt_rating;
+            if item.imdb_id.is_none() {
+                item.imdb_id = imdb_id;
+            }
+        }
+    }
+
+    async fn card(&self, media_type: &str, tmdb_id: i64) -> AppResult<MediaItem> {
+        match media_type {
+            "movie" => {
+                let url = format!("{TMDB_BASE}/movie/{tmdb_id}");
+                let m: TmdbMovie = self
+                    .http
+                    .get(&url)
+                    .query(&[
+                        ("api_key", self.api_key.as_str()),
+                        ("language", self.lang()),
+                    ])
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await?;
+                Ok(MediaItem {
+                    media_type: "movie".into(),
+                    tmdb_id: m.id,
+                    title: m.title.unwrap_or_else(|| "Untitled".into()),
+                    original_title: m.original_title,
+                    year: year_from_date(m.release_date.as_deref()),
+                    poster_url: poster_url(m.poster_path.as_deref()),
+                    overview: m.overview,
+                    imdb_id: None,
+                    imdb_rating: None,
+                    rt_rating: None,
+                    popularity: m.popularity,
+                    vote_average: m.vote_average,
+                    seasons: Vec::new(),
+                })
+            }
+            "tv" => {
+                let url = format!("{TMDB_BASE}/tv/{tmdb_id}");
+                let t: TmdbTv = self
+                    .http
+                    .get(&url)
+                    .query(&[
+                        ("api_key", self.api_key.as_str()),
+                        ("language", self.lang()),
+                    ])
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await?;
+                Ok(MediaItem {
+                    media_type: "tv".into(),
+                    tmdb_id: t.id,
+                    title: t.name.unwrap_or_else(|| "Untitled".into()),
+                    original_title: t.original_name,
+                    year: year_from_date(t.first_air_date.as_deref()),
+                    poster_url: poster_url(t.poster_path.as_deref()),
+                    overview: t.overview,
+                    imdb_id: None,
+                    imdb_rating: None,
+                    rt_rating: None,
+                    popularity: t.popularity,
+                    vote_average: t.vote_average,
+                    seasons: Vec::new(),
+                })
+            }
+            _ => Err(AppError::BadRequest(
+                "media_type must be movie or tv".into(),
+            )),
+        }
+    }
+
     pub async fn popular_tv(&self, page: u32) -> AppResult<Vec<MediaItem>> {
         self.ensure_key()?;
         let url = format!("{TMDB_BASE}/tv/popular");

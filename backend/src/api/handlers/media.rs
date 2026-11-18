@@ -14,6 +14,8 @@ pub struct BrowseQuery {
     pub page: u32,
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default = "default_source")]
+    pub source: String,
 }
 
 fn default_page() -> u32 {
@@ -22,6 +24,10 @@ fn default_page() -> u32 {
 
 fn default_kind() -> String {
     "latest".into()
+}
+
+fn default_source() -> String {
+    "tmdb".into()
 }
 
 #[derive(Deserialize)]
@@ -75,7 +81,8 @@ pub async fn search_media(
     tag = "Media",
     params(
         ("page" = Option<u32>, Query, description = "Page number"),
-        ("kind" = Option<String>, Query, description = "latest | popular")
+        ("kind" = Option<String>, Query, description = "latest | popular | top"),
+        ("source" = Option<String>, Query, description = "tmdb | imdb | rt")
     ),
     responses((status = 200, body = [MediaItem])),
     security(("bearer_auth" = []))
@@ -84,14 +91,7 @@ pub async fn list_movies(
     State(state): State<AppState>,
     Query(q): Query<BrowseQuery>,
 ) -> AppResult<Json<Vec<MediaItem>>> {
-    let page = q.page.max(1);
-    let tmdb = state.clients().await.tmdb;
-    let items = if q.kind == "popular" {
-        tmdb.popular_movies(page).await?
-    } else {
-        tmdb.latest_movies(page).await?
-    };
-    Ok(Json(with_ratings(&state, items).await))
+    Ok(Json(browse(&state, "movie", q).await?))
 }
 
 #[utoipa::path(
@@ -100,7 +100,8 @@ pub async fn list_movies(
     tag = "Media",
     params(
         ("page" = Option<u32>, Query, description = "Page number"),
-        ("kind" = Option<String>, Query, description = "latest | popular")
+        ("kind" = Option<String>, Query, description = "latest | popular | top"),
+        ("source" = Option<String>, Query, description = "tmdb | imdb | rt")
     ),
     responses((status = 200, body = [MediaItem])),
     security(("bearer_auth" = []))
@@ -109,14 +110,45 @@ pub async fn list_tv(
     State(state): State<AppState>,
     Query(q): Query<BrowseQuery>,
 ) -> AppResult<Json<Vec<MediaItem>>> {
+    Ok(Json(browse(&state, "tv", q).await?))
+}
+
+async fn browse(state: &AppState, media_type: &str, q: BrowseQuery) -> AppResult<Vec<MediaItem>> {
     let page = q.page.max(1);
-    let tmdb = state.clients().await.tmdb;
-    let items = if q.kind == "popular" {
-        tmdb.popular_tv(page).await?
-    } else {
-        tmdb.latest_tv(page).await?
+    let clients = state.clients().await;
+    let items = match q.source.as_str() {
+        "" | "tmdb" => tmdb_list(&clients.tmdb, media_type, &q.kind, page).await?,
+        "imdb" | "rt" => {
+            let mut items = clients
+                .mdblist
+                .chart(media_type, &q.source, &q.kind, page)
+                .await?;
+            clients.tmdb.localize_cards(&mut items).await;
+            items
+        }
+        _ => {
+            return Err(crate::error::AppError::BadRequest(
+                "source must be tmdb, imdb, or rt".into(),
+            ))
+        }
     };
-    Ok(Json(with_ratings(&state, items).await))
+    Ok(with_ratings(state, items).await)
+}
+
+async fn tmdb_list(
+    tmdb: &crate::infra::tmdb::TmdbClient,
+    media_type: &str,
+    kind: &str,
+    page: u32,
+) -> AppResult<Vec<MediaItem>> {
+    match (media_type, kind) {
+        ("tv", "popular") => tmdb.popular_tv(page).await,
+        ("tv", "top") => tmdb.top_rated_tv(page).await,
+        ("tv", _) => tmdb.latest_tv(page).await,
+        (_, "popular") => tmdb.popular_movies(page).await,
+        (_, "top") => tmdb.top_rated_movies(page).await,
+        _ => tmdb.latest_movies(page).await,
+    }
 }
 
 #[utoipa::path(

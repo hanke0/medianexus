@@ -132,6 +132,107 @@ impl MdblistClient {
             .map(|row| (row.id, finite_rating(row.rating)))
             .collect())
     }
+
+    /// One page of an IMDb or Rotten Tomatoes chart.
+    /// `media_type` is `movie` or `tv`. `source` is `imdb` or `rt`.
+    /// `kind` is `latest`, `popular`, or `top`.
+    pub async fn chart(
+        &self,
+        media_type: &str,
+        source: &str,
+        kind: &str,
+        page: u32,
+    ) -> AppResult<Vec<MediaItem>> {
+        if !self.configured() {
+            return Err(AppError::BadRequest(
+                "浏览 IMDb 或烂番茄需要先在设置中填写 MDBList API Key".into(),
+            ));
+        }
+        let (list, sort, order) = chart_query(source, kind)?;
+        let url = format!("{API}/lists/official/{list}/items");
+        let page = page.max(1);
+        let limit = CHART_PAGE.to_string();
+        let offset = ((page - 1) * CHART_PAGE).to_string();
+        let response = self
+            .http
+            .get(url)
+            .query(&[
+                ("apikey", self.api_key.trim()),
+                ("limit", limit.as_str()),
+                ("offset", offset.as_str()),
+                ("sort", sort),
+                ("order", order),
+                (
+                    "mediatype",
+                    if media_type == "tv" { "show" } else { "movie" },
+                ),
+                ("append_to_response", "poster,description,ratings"),
+            ])
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| {
+                AppError::Internal(format!(
+                    "mdblist chart request failed: {}",
+                    err.without_url()
+                ))
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AppError::Internal(format!(
+                "mdblist chart returned {status}"
+            )));
+        }
+        let body: ChartPage = response.json().await.map_err(|err| {
+            AppError::Internal(format!(
+                "mdblist chart response was not a list: {}",
+                err.without_url()
+            ))
+        })?;
+        let rows = if media_type == "tv" {
+            if body.shows.is_empty() {
+                body.movies
+            } else {
+                body.shows
+            }
+        } else if body.movies.is_empty() {
+            body.shows
+        } else {
+            body.movies
+        };
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| chart_item(media_type, row))
+            .collect())
+    }
+}
+
+const CHART_PAGE: u32 = 20;
+
+fn chart_query(source: &str, kind: &str) -> AppResult<(&'static str, &'static str, &'static str)> {
+    let list = match source {
+        "imdb" => "moviemeter",
+        "rt" => "popular",
+        _ => {
+            return Err(AppError::BadRequest(
+                "source must be tmdb, imdb, or rt".into(),
+            ))
+        }
+    };
+    let (sort, order) = match (source, kind) {
+        ("imdb", "latest") => ("released", "desc"),
+        ("imdb", "popular") => ("imdbpopular", "desc"),
+        ("imdb", "top") => ("imdbrating", "desc"),
+        ("rt", "latest") => ("released", "desc"),
+        ("rt", "popular") => ("rank", "asc"),
+        ("rt", "top") => ("rtomatoes", "desc"),
+        _ => {
+            return Err(AppError::BadRequest(
+                "kind must be latest, popular, or top".into(),
+            ))
+        }
+    };
+    Ok((list, sort, order))
 }
 
 /// Fill IMDb (0–10) and Rotten Tomatoes (0–100) on list/detail items.
@@ -246,9 +347,104 @@ fn finite_rating(value: Option<f64>) -> Option<f64> {
     value.filter(|n| n.is_finite())
 }
 
+#[derive(Debug, Deserialize)]
+struct ChartPage {
+    #[serde(default)]
+    movies: Vec<ChartItem>,
+    #[serde(default)]
+    shows: Vec<ChartItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartItem {
+    id: i64,
+    title: Option<String>,
+    imdb_id: Option<String>,
+    release_year: Option<i32>,
+    poster: Option<String>,
+    description: Option<String>,
+    ids: Option<ChartIds>,
+    #[serde(default)]
+    ratings: Vec<ChartRating>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartIds {
+    tmdb: Option<i64>,
+    imdb: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartRating {
+    source: String,
+    value: Option<f64>,
+}
+
+fn chart_item(media_type: &str, row: ChartItem) -> Option<MediaItem> {
+    let tmdb_id = row.ids.as_ref().and_then(|ids| ids.tmdb).unwrap_or(row.id);
+    if tmdb_id <= 0 {
+        return None;
+    }
+    let imdb_id = row
+        .imdb_id
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            row.ids
+                .as_ref()
+                .and_then(|ids| ids.imdb.clone())
+                .filter(|id| !id.is_empty())
+        });
+    let mut imdb_rating = None;
+    let mut rt_rating = None;
+    let mut vote_average = None;
+    for rating in row.ratings {
+        let Some(value) = finite_rating(rating.value) else {
+            continue;
+        };
+        match rating.source.as_str() {
+            "imdb" => imdb_rating = Some(value),
+            "tomatoes" => rt_rating = Some(value),
+            "tmdb" => vote_average = Some(tmdb_vote(value)),
+            _ => {}
+        }
+    }
+    Some(MediaItem {
+        media_type: media_type.to_string(),
+        tmdb_id,
+        title: row.title.unwrap_or_else(|| "Untitled".into()),
+        original_title: None,
+        year: row.release_year.map(|year| year.to_string()),
+        poster_url: chart_poster(row.poster),
+        overview: row.description.filter(|text| !text.trim().is_empty()),
+        imdb_id,
+        imdb_rating,
+        rt_rating,
+        popularity: None,
+        vote_average,
+        seasons: Vec::new(),
+    })
+}
+
+fn tmdb_vote(value: f64) -> f64 {
+    if value > 10.0 { value / 10.0 } else { value }
+}
+
+fn chart_poster(poster: Option<String>) -> Option<String> {
+    let poster = poster.filter(|p| !p.is_empty())?;
+    if poster.starts_with("http://") || poster.starts_with("https://") {
+        return Some(poster);
+    }
+    let path = if poster.starts_with('/') {
+        poster
+    } else {
+        format!("/{poster}")
+    };
+    Some(format!("https://image.tmdb.org/t/p/w500{path}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::RatingResponse;
+    use super::{chart_item, chart_query, ChartItem, RatingResponse};
 
     #[test]
     fn parses_rating_payload() {
@@ -260,5 +456,40 @@ mod tests {
         assert_eq!(body.ratings[0].id, 923);
         assert_eq!(body.ratings[0].rating, Some(8.1));
         assert_eq!(body.ratings[1].rating, None);
+    }
+
+    #[test]
+    fn chart_sort_follows_source() {
+        assert_eq!(
+            chart_query("imdb", "top").unwrap(),
+            ("moviemeter", "imdbrating", "desc")
+        );
+        assert_eq!(
+            chart_query("rt", "latest").unwrap(),
+            ("popular", "released", "desc")
+        );
+        assert_eq!(
+            chart_query("rt", "top").unwrap(),
+            ("popular", "rtomatoes", "desc")
+        );
+        assert!(chart_query("tmdb", "top").is_err());
+    }
+
+    #[test]
+    fn chart_item_keeps_scores_when_some_ratings_are_empty() {
+        let row: ChartItem = serde_json::from_str(
+            r#"{"id":278,"title":"Shawshank","imdb_id":"tt0111161","release_year":1994,"poster":"/x.jpg","ratings":[{"source":"imdb","value":9.3},{"source":"tomatoes","value":null},{"source":"tmdb","value":80}]}"#,
+        )
+        .unwrap();
+        let item = chart_item("movie", row).unwrap();
+        assert_eq!(item.tmdb_id, 278);
+        assert_eq!(item.media_type, "movie");
+        assert_eq!(item.imdb_rating, Some(9.3));
+        assert_eq!(item.rt_rating, None);
+        assert_eq!(item.vote_average, Some(8.0));
+        assert_eq!(
+            item.poster_url.as_deref(),
+            Some("https://image.tmdb.org/t/p/w500/x.jpg")
+        );
     }
 }
