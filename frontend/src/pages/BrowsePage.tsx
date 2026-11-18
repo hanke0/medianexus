@@ -71,9 +71,6 @@ export function BrowsePage() {
     if (sort === "rt") list.sort(byRating((item) => item.rt_rating));
     return list;
   }, [query.data, sort]);
-  const missingScores =
-    items.length > 0 &&
-    items.every((item) => item.imdb_rating == null && item.rt_rating == null);
 
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
@@ -181,24 +178,19 @@ export function BrowsePage() {
       </div>
 
       {searching && (
-        <p className={styles.muted}>
+        <p className="notice">
           搜索「{queryText}」· {tab === "movies" ? "电影" : "电视剧"}
         </p>
       )}
-      {!query.isLoading && missingScores && (
-        <p className={styles.muted}>
-          没有 IMDb / 烂番茄评分。管理员可在设置中填写 MDBList API Key。
-        </p>
-      )}
 
-      {query.isLoading && <p className={styles.muted}>加载中…</p>}
+      {query.isLoading && <p className="notice">加载中…</p>}
       {query.isError && (
         <p className={styles.error}>
           {(query.error as Error).message || "加载失败，请检查 TMDB 配置"}
         </p>
       )}
       {!query.isLoading && !query.isError && items.length === 0 && (
-        <p className={styles.muted}>{searching ? "没有找到相关结果" : "暂无内容"}</p>
+        <p className="notice">{searching ? "没有找到相关结果" : "暂无内容"}</p>
       )}
 
       <div className={styles.grid}>
@@ -232,7 +224,7 @@ export function BrowsePage() {
         >
           上一页
         </button>
-        <span>第 {page} 页</span>
+        <span className="notice">第 {page} 页</span>
         <button
           type="button"
           className="btn ghost"

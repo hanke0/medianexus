@@ -200,7 +200,7 @@ export function SettingsPage() {
 
   return (
     <div className={styles.page}>
-      {query.isLoading && <p className={styles.muted}>加载中…</p>}
+      {query.isLoading && <p className="notice">加载中…</p>}
 
       <div className={styles.form}>
         <fieldset>
@@ -254,7 +254,7 @@ export function SettingsPage() {
               autoComplete="off"
             />
           </label>
-          <p className={styles.scheduleHint}>
+          <p className={`notice ${styles.scheduleHint}`}>
             用于展示 IMDb 和烂番茄评分。在 mdblist.com 的偏好设置里生成免费 Key。
           </p>
         </fieldset>
@@ -446,7 +446,7 @@ export function SettingsPage() {
 
         <fieldset>
           <legend>定时任务</legend>
-          <p className={styles.scheduleHint}>
+          <p className={`notice ${styles.scheduleHint}`}>
             仅配置间隔（最少 1 分钟）。任务从每天 0:00 起按间隔对齐执行。
           </p>
           <label className="field">

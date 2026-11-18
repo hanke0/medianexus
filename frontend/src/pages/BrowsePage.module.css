@@ -73,11 +73,6 @@
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  color: var(--muted);
-}
-
-.muted {
-  color: var(--muted);
 }
 
 .error {

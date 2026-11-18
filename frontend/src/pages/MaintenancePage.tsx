@@ -53,7 +53,7 @@ export function MaintenancePage() {
 
   return (
     <div className={styles.page}>
-      <p className={styles.hint}>
+      <p className="notice">
         先在「发现」添加追踪；后台会按设置自动搜种、检查下载并入库。这里可手动触发维护任务。
       </p>
 
@@ -118,9 +118,9 @@ export function MaintenancePage() {
           </div>
         </div>
 
-        {itemsQuery.isLoading && <p className={styles.muted}>加载中…</p>}
+        {itemsQuery.isLoading && <p className="notice">加载中…</p>}
         {!itemsQuery.isLoading && (itemsQuery.data?.length ?? 0) === 0 && (
-          <p className={styles.muted}>暂无数据，请先运行「同步影视库目录」。</p>
+          <p className="notice">暂无数据，请先运行「同步影视库目录」。</p>
         )}
 
         <div className={styles.table}>

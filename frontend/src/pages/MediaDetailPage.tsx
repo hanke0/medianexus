@@ -84,7 +84,7 @@ export function MediaDetailPage() {
   }
 
   if (query.isLoading) {
-    return <p className={styles.muted}>加载中…</p>;
+    return <p className="notice">加载中…</p>;
   }
 
   if (query.isError || !query.data) {
@@ -253,12 +253,12 @@ function TvSeasons({
   onTrackAll: () => void;
 }) {
   if (seasons.length === 0) {
-    return <p className={styles.muted}>没有读到分季信息。</p>;
+    return <p className="notice">没有读到分季信息。</p>;
   }
   return (
     <section className={styles.seasons}>
       <div className={styles.seasonTools}>
-        <p className={styles.muted}>
+        <p className="notice">
           按季追踪。有全集优先下载全集，否则下载已有的单集。文件放在
           剧名/剧名-S01/ 下，文件名保持下载时的原名。
         </p>
@@ -315,7 +315,7 @@ function TvSeasons({
             </div>
             {open && (
               <div className={styles.episodes}>
-                {episodesLoading && <p className={styles.muted}>加载分集…</p>}
+                {episodesLoading && <p className="notice">加载分集…</p>}
                 {!episodesLoading &&
                   episodes.map((ep) => {
                     const row = findTrack(tracks, season.season_number, ep.episode_number);

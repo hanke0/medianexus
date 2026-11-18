@@ -81,9 +81,9 @@ export function TracksPage() {
 
   return (
     <div className={styles.page}>
-      {query.isLoading && <p className={styles.muted}>加载中…</p>}
+      {query.isLoading && <p className="notice">加载中…</p>}
       {!query.isLoading && tracks.length === 0 && (
-        <p className={styles.muted}>还没有追踪。去「发现」页点一下追踪即可。</p>
+        <p className="notice">还没有追踪。去「发现」页点一下追踪即可。</p>
       )}
 
       <div className={styles.list}>
