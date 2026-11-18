@@ -57,6 +57,12 @@ export async function api<T>(
   return (await res.json()) as T;
 }
 
+export type MediaCatalog = {
+  id: string;
+  label: string;
+  media_type: "movie" | "tv" | "all";
+};
+
 export type MediaItem = {
   media_type: string;
   tmdb_id: number;
@@ -225,10 +231,11 @@ export const endpoints = {
       { method: "POST", body: JSON.stringify({ username, password }) },
     ),
   me: () => api<{ id: string; username: string; role: string }>("/auth/me"),
-  movies: (page = 1, kind = "latest", source = "tmdb") =>
-    api<MediaItem[]>(`/media/movies?page=${page}&kind=${kind}&source=${source}`),
-  tv: (page = 1, kind = "latest", source = "tmdb") =>
-    api<MediaItem[]>(`/media/tv?page=${page}&kind=${kind}&source=${source}`),
+  catalogs: () => api<MediaCatalog[]>("/media/catalogs"),
+  browse: (mediaType: "movie" | "tv", page: number, catalog: string) =>
+    api<MediaItem[]>(
+      `/media/${mediaType === "movie" ? "movies" : "tv"}?page=${page}&catalog=${encodeURIComponent(catalog)}`,
+    ),
   searchMedia: (q: string, page = 1, media_type: "movie" | "tv" | "all" = "all") =>
     api<MediaItem[]>(
       `/media/search?q=${encodeURIComponent(q)}&page=${page}&media_type=${media_type}`,

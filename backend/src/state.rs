@@ -5,7 +5,8 @@ use crate::infra::tmdb::MediaItem;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use chrono::{Local, TimeZone};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -42,16 +43,18 @@ impl AppState {
         })
     }
 
-    /// A recent browse page, if it is still inside `ttl`.
-    pub async fn cached_browse(&self, key: &str, ttl: Duration) -> Option<Vec<MediaItem>> {
+    /// A browse page fetched during the current local day. It expires at the next local midnight.
+    pub async fn cached_browse(&self, key: &str) -> Option<Vec<MediaItem>> {
         let now = unix_now();
         let mut cache = self.browse_cache.write().await;
-        cache.get(key, ttl, now)
+        cache.get(key, now)
     }
 
     pub async fn remember_browse(&self, key: String, items: Vec<MediaItem>) {
+        let now = unix_now();
+        let expires_at = next_local_midnight_unix();
         let mut cache = self.browse_cache.write().await;
-        cache.insert(key, items, unix_now());
+        cache.insert(key, items, expires_at, now);
     }
 
     pub async fn settings(&self) -> IntegrationSettings {
@@ -73,7 +76,6 @@ impl AppState {
 }
 
 const BROWSE_CACHE_CAP: usize = 128;
-const MAX_BROWSE_TTL: Duration = Duration::from_secs(3 * 60 * 60);
 
 #[derive(Default)]
 struct BrowseCache {
@@ -81,16 +83,16 @@ struct BrowseCache {
 }
 
 struct CachedBrowse {
-    stored_at: i64,
+    expires_at: i64,
     items: Vec<MediaItem>,
 }
 
 impl BrowseCache {
-    fn get(&mut self, key: &str, ttl: Duration, now: i64) -> Option<Vec<MediaItem>> {
+    fn get(&mut self, key: &str, now: i64) -> Option<Vec<MediaItem>> {
         let fresh = self
             .pages
             .get(key)
-            .is_some_and(|page| still_fresh(page.stored_at, now, ttl));
+            .is_some_and(|page| page.expires_at > now);
         if !fresh {
             self.pages.remove(key);
             return None;
@@ -98,27 +100,40 @@ impl BrowseCache {
         self.pages.get(key).map(|page| page.items.clone())
     }
 
-    fn insert(&mut self, key: String, items: Vec<MediaItem>, now: i64) {
+    fn insert(&mut self, key: String, items: Vec<MediaItem>, expires_at: i64, now: i64) {
         if self.pages.len() >= BROWSE_CACHE_CAP && !self.pages.contains_key(&key) {
-            self.pages
-                .retain(|_, page| still_fresh(page.stored_at, now, MAX_BROWSE_TTL));
+            self.pages.retain(|_, page| page.expires_at > now);
         }
         if self.pages.len() >= BROWSE_CACHE_CAP && !self.pages.contains_key(&key) {
             if let Some(oldest) = self
                 .pages
                 .iter()
-                .min_by_key(|(_, page)| page.stored_at)
+                .min_by_key(|(_, page)| page.expires_at)
                 .map(|(key, _)| key.clone())
             {
                 self.pages.remove(&oldest);
             }
         }
-        self.pages.insert(key, CachedBrowse { stored_at: now, items });
+        self.pages
+            .insert(key, CachedBrowse { expires_at, items });
     }
 }
 
-fn still_fresh(stored_at: i64, now: i64, ttl: Duration) -> bool {
-    now.saturating_sub(stored_at) < ttl.as_secs() as i64
+fn next_local_midnight_unix() -> i64 {
+    next_local_midnight(Local::now()).timestamp()
+}
+
+fn next_local_midnight(now: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
+    let Some(next_day) = now.date_naive().succ_opt() else {
+        return now + chrono::Duration::hours(24);
+    };
+    let Some(naive) = next_day.and_hms_opt(0, 0, 0) else {
+        return now + chrono::Duration::hours(24);
+    };
+    match Local.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(dt) | chrono::LocalResult::Ambiguous(dt, _) => dt,
+        chrono::LocalResult::None => now + chrono::Duration::hours(24),
+    }
 }
 
 fn unix_now() -> i64 {
@@ -133,18 +148,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn browse_page_expires_and_evicts_the_oldest() {
+    fn browse_page_expires_at_midnight_and_evicts_the_oldest() {
         let mut cache = BrowseCache::default();
-        cache.insert("a".into(), Vec::new(), 1_000);
-        assert!(cache.get("a", Duration::from_secs(30), 1_020).is_some());
-        assert!(cache.get("a", Duration::from_secs(30), 1_030).is_none());
+        cache.insert("a".into(), Vec::new(), 1_030, 1_000);
+        assert!(cache.get("a", 1_020).is_some());
+        assert!(cache.get("a", 1_030).is_none());
 
         for i in 0..BROWSE_CACHE_CAP {
-            cache.insert(format!("k{i}"), Vec::new(), 5_000 + i as i64);
+            cache.insert(format!("k{i}"), Vec::new(), 5_000 + i as i64, 4_000);
         }
-        cache.insert("new".into(), Vec::new(), 9_000);
+        cache.insert("new".into(), Vec::new(), 9_000, 4_000);
         assert_eq!(cache.pages.len(), BROWSE_CACHE_CAP);
-        assert!(cache.get("new", Duration::from_secs(60), 9_010).is_some());
-        assert!(cache.get("k0", Duration::from_secs(10_000), 9_010).is_none());
+        assert!(cache.get("new", 8_000).is_some());
+        assert!(cache.get("k0", 8_000).is_none());
+    }
+
+    #[test]
+    fn next_midnight_is_the_following_local_day() {
+        let now = Local
+            .with_ymd_and_hms(2026, 11, 18, 23, 15, 0)
+            .single()
+            .expect("local time");
+        let midnight = next_local_midnight(now);
+        assert_eq!(midnight.date_naive(), now.date_naive().succ_opt().unwrap());
+        assert_eq!(midnight.time(), chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        assert!(midnight.timestamp() > now.timestamp());
     }
 }

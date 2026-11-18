@@ -133,26 +133,25 @@ impl MdblistClient {
             .collect())
     }
 
-    /// One page of an IMDb or Rotten Tomatoes chart.
-    /// `media_type` is `movie` or `tv`. `source` is `imdb` or `rt`.
-    /// `kind` is `latest`, `popular`, or `top`.
-    pub async fn chart(
+    /// One page of an MDBList list in its own rank order.
+    /// `media_type` is `movie` or `tv`.
+    pub async fn ranked_list(
         &self,
+        user: &str,
+        slug: &str,
         media_type: &str,
-        source: &str,
-        kind: &str,
         page: u32,
     ) -> AppResult<Vec<MediaItem>> {
         if !self.configured() {
             return Err(AppError::BadRequest(
-                "浏览 IMDb 或烂番茄需要先在设置中填写 MDBList API Key".into(),
+                "浏览这个列表需要先在设置中填写 MDBList API Key".into(),
             ));
         }
-        let (list, sort, order) = chart_query(source, kind)?;
-        let url = format!("{API}/lists/official/{list}/items");
+        let url = format!("{API}/lists/{user}/{slug}/items");
         let page = page.max(1);
         let limit = CHART_PAGE.to_string();
         let offset = ((page - 1) * CHART_PAGE).to_string();
+        let media = if media_type == "tv" { "show" } else { "movie" };
         let response = self
             .http
             .get(url)
@@ -160,12 +159,9 @@ impl MdblistClient {
                 ("apikey", self.api_key.trim()),
                 ("limit", limit.as_str()),
                 ("offset", offset.as_str()),
-                ("sort", sort),
-                ("order", order),
-                (
-                    "mediatype",
-                    if media_type == "tv" { "show" } else { "movie" },
-                ),
+                ("sort", "rank"),
+                ("order", "asc"),
+                ("mediatype", media),
                 ("append_to_response", "poster,description,ratings"),
             ])
             .timeout(Duration::from_secs(20))
@@ -208,32 +204,6 @@ impl MdblistClient {
 }
 
 const CHART_PAGE: u32 = 20;
-
-fn chart_query(source: &str, kind: &str) -> AppResult<(&'static str, &'static str, &'static str)> {
-    let list = match source {
-        "imdb" => "moviemeter",
-        "rt" => "popular",
-        _ => {
-            return Err(AppError::BadRequest(
-                "source must be tmdb, imdb, or rt".into(),
-            ))
-        }
-    };
-    let (sort, order) = match (source, kind) {
-        ("imdb", "latest") => ("released", "desc"),
-        ("imdb", "popular") => ("imdbpopular", "desc"),
-        ("imdb", "top") => ("imdbrating", "desc"),
-        ("rt", "latest") => ("released", "desc"),
-        ("rt", "popular") => ("rank", "asc"),
-        ("rt", "top") => ("rtomatoes", "desc"),
-        _ => {
-            return Err(AppError::BadRequest(
-                "kind must be latest, popular, or top".into(),
-            ))
-        }
-    };
-    Ok((list, sort, order))
-}
 
 /// Fill IMDb (0–10) and Rotten Tomatoes (0–100) on list/detail items.
 /// A missing key or a remote failure leaves the scores empty and still returns the list.
@@ -444,7 +414,7 @@ fn chart_poster(poster: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{chart_item, chart_query, ChartItem, RatingResponse};
+    use super::{chart_item, ChartItem, RatingResponse};
 
     #[test]
     fn parses_rating_payload() {
@@ -456,23 +426,6 @@ mod tests {
         assert_eq!(body.ratings[0].id, 923);
         assert_eq!(body.ratings[0].rating, Some(8.1));
         assert_eq!(body.ratings[1].rating, None);
-    }
-
-    #[test]
-    fn chart_sort_follows_source() {
-        assert_eq!(
-            chart_query("imdb", "top").unwrap(),
-            ("moviemeter", "imdbrating", "desc")
-        );
-        assert_eq!(
-            chart_query("rt", "latest").unwrap(),
-            ("popular", "released", "desc")
-        );
-        assert_eq!(
-            chart_query("rt", "top").unwrap(),
-            ("popular", "rtomatoes", "desc")
-        );
-        assert!(chart_query("tmdb", "top").is_err());
     }
 
     #[test]

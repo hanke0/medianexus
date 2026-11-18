@@ -19,6 +19,7 @@ use utoipa::{Modify, OpenApi};
         handlers::users::create_user,
         handlers::users::delete_user,
         handlers::media::search_media,
+        handlers::media::list_catalogs,
         handlers::media::list_movies,
         handlers::media::list_tv,
         handlers::media::get_media,

@@ -26,6 +26,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/users/{id}", delete(handlers::users::delete_user))
         .route("/media/search", get(handlers::media::search_media))
+        .route("/media/catalogs", get(handlers::media::list_catalogs))
         .route("/media/movies", get(handlers::media::list_movies))
         .route("/media/tv", get(handlers::media::list_tv))
         .route(

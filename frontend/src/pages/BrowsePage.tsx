@@ -2,18 +2,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
+import { Select } from "@/components/Select";
 import { useToast } from "@/components/Toast";
-import { ApiError, endpoints, type MediaItem } from "@/lib/api";
+import { ApiError, endpoints, type MediaCatalog, type MediaItem } from "@/lib/api";
 import styles from "./BrowsePage.module.css";
 
 type Tab = "movies" | "tv";
-type Kind = "latest" | "popular" | "top";
-type Source = "tmdb" | "imdb" | "rt";
+
+const FALLBACK_CATALOGS: MediaCatalog[] = [
+  { id: "tmdb:latest", label: "TMDB 最新", media_type: "all" },
+  { id: "tmdb:popular", label: "TMDB 最热", media_type: "all" },
+  { id: "tmdb:top", label: "TMDB 高分", media_type: "all" },
+  { id: "imdb:moviemeter", label: "IMDb 最热", media_type: "all" },
+];
 
 export function BrowsePage() {
   const [tab, setTab] = useState<Tab>("movies");
-  const [kind, setKind] = useState<Kind>("latest");
-  const [source, setSource] = useState<Source>("tmdb");
+  const [catalog, setCatalog] = useState("tmdb:latest");
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [queryText, setQueryText] = useState("");
@@ -23,17 +28,25 @@ export function BrowsePage() {
 
   const searching = queryText.trim().length > 0;
   const searchType = tab === "movies" ? "movie" : "tv";
+  const catalogs = useQuery({
+    queryKey: ["media-catalogs"],
+    queryFn: endpoints.catalogs,
+  });
+  const catalogOptions = (catalogs.data ?? FALLBACK_CATALOGS).filter(
+    (item) => item.media_type === "all" || item.media_type === searchType,
+  );
+  const activeCatalog = catalogOptions.some((item) => item.id === catalog)
+    ? catalog
+    : "tmdb:latest";
 
   const query = useQuery({
     queryKey: searching
       ? ["media-search", searchType, queryText, page]
-      : ["media", tab, kind, source, page],
+      : ["media", searchType, activeCatalog, page],
     queryFn: () =>
       searching
         ? endpoints.searchMedia(queryText.trim(), page, searchType)
-        : tab === "movies"
-          ? endpoints.movies(page, kind, source)
-          : endpoints.tv(page, kind, source),
+        : endpoints.browse(searchType, page, activeCatalog),
   });
 
   const trackMutation = useMutation({
@@ -112,72 +125,20 @@ export function BrowsePage() {
         </div>
         <div className={styles.tools}>
           {!searching && (
-            <>
-              <div className={styles.tabs} aria-label="排序">
-                <button
-                  type="button"
-                  className={kind === "latest" ? styles.active : undefined}
-                  onClick={() => {
-                    setKind("latest");
-                    setPage(1);
-                  }}
-                >
-                  最新
-                </button>
-                <button
-                  type="button"
-                  className={kind === "popular" ? styles.active : undefined}
-                  onClick={() => {
-                    setKind("popular");
-                    setPage(1);
-                  }}
-                >
-                  最热
-                </button>
-                <button
-                  type="button"
-                  className={kind === "top" ? styles.active : undefined}
-                  onClick={() => {
-                    setKind("top");
-                    setPage(1);
-                  }}
-                >
-                  高分
-                </button>
-              </div>
-              <div className={styles.tabs} aria-label="数据来源">
-                <button
-                  type="button"
-                  className={source === "tmdb" ? styles.active : undefined}
-                  onClick={() => {
-                    setSource("tmdb");
-                    setPage(1);
-                  }}
-                >
-                  TMDB
-                </button>
-                <button
-                  type="button"
-                  className={source === "imdb" ? styles.active : undefined}
-                  onClick={() => {
-                    setSource("imdb");
-                    setPage(1);
-                  }}
-                >
-                  IMDb
-                </button>
-                <button
-                  type="button"
-                  className={source === "rt" ? styles.active : undefined}
-                  onClick={() => {
-                    setSource("rt");
-                    setPage(1);
-                  }}
-                >
-                  烂番茄
-                </button>
-              </div>
-            </>
+            <div className={styles.catalog}>
+              <Select
+                aria-label="列表"
+                value={activeCatalog}
+                options={catalogOptions.map((item) => ({
+                  value: item.id,
+                  label: item.label,
+                }))}
+                onChange={(value) => {
+                  setCatalog(value);
+                  setPage(1);
+                }}
+              />
+            </div>
           )}
         </div>
       </div>

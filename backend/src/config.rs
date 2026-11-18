@@ -13,6 +13,36 @@ pub struct Config {
     pub library_dir: PathBuf,
     pub admin_username: String,
     pub admin_password: String,
+    /// MDBList lists shown in the browse dropdown, after the built-in catalogs.
+    pub browse_lists: Vec<BrowseList>,
+}
+
+/// An MDBList list addressed as `movie:user/slug` or `tv:user/slug`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrowseList {
+    pub user: String,
+    pub slug: String,
+    pub media_type: String,
+}
+
+impl BrowseList {
+    pub fn id(&self) -> String {
+        format!("list:{}/{}", self.user, self.slug)
+    }
+
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
+
+    pub fn label(&self) -> String {
+        match (self.user.as_str(), self.slug.as_str()) {
+            ("snoak", "imdb-top-250-movies") => "IMDb Top 250".into(),
+            ("snoak", "imdb-top-250-shows") => "IMDb Top 250".into(),
+            ("snoak", "most-popular-movies-on-rotten-tomatoes") => "烂番茄最热".into(),
+            ("snoak", "most-popular-shows-on-rotten-tomatoes") => "烂番茄最热".into(),
+            _ => self.slug.replace('-', " "),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -24,6 +54,7 @@ pub struct CliArgs {
     pub jwt_secret: Option<String>,
     pub admin_username: Option<String>,
     pub admin_password: Option<String>,
+    pub browse_lists: Vec<String>,
 }
 
 impl CliArgs {
@@ -43,6 +74,16 @@ impl CliArgs {
                 "--jwt-secret" => cli.jwt_secret = iter.next(),
                 "--admin-username" => cli.admin_username = iter.next(),
                 "--admin-password" => cli.admin_password = iter.next(),
+                "--list" => {
+                    if let Some(value) = iter.next() {
+                        cli.browse_lists.push(value);
+                    }
+                }
+                "--lists" => {
+                    if let Some(value) = iter.next() {
+                        push_list_tokens(&mut cli.browse_lists, &value);
+                    }
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -74,6 +115,13 @@ impl CliArgs {
                 }
                 other if other.starts_with("--jwt-secret=") => {
                     cli.jwt_secret = Some(other.trim_start_matches("--jwt-secret=").to_string());
+                }
+                other if other.starts_with("--list=") => {
+                    cli.browse_lists
+                        .push(other.trim_start_matches("--list=").to_string());
+                }
+                other if other.starts_with("--lists=") => {
+                    push_list_tokens(&mut cli.browse_lists, other.trim_start_matches("--lists="));
                 }
                 _ => {}
             }
@@ -107,6 +155,12 @@ Options:
   --jwt-secret <secret>      JWT secret (env JWT_SECRET); if omitted, random each start
   --admin-username <name>    Bootstrap admin (env ADMIN_USERNAME, default admin)
   --admin-password <pass>    Bootstrap admin (env ADMIN_PASSWORD, default admin123)
+  --list <movie|tv:user/slug>
+                             Extra MDBList browse list. Repeatable.
+                             The type is required: movie:user/slug or tv:user/slug.
+                             The built-in dropdown always includes TMDB 最新/最热/高分,
+                             IMDb 最热, and snoak's IMDb Top 250 / Rotten Tomatoes lists.
+  --lists <a,b>              Comma-separated extra lists (env BROWSE_LISTS)
   -h, --help                 Show help
   -V, --version              Show version
 "
@@ -127,6 +181,7 @@ impl Config {
     }
 
     pub fn from_cli_and_env(cli: CliArgs) -> Self {
+        let browse_lists = configured_browse_lists(&cli);
         let (jwt_secret, jwt_secret_ephemeral) =
             match cli.jwt_secret.or_else(|| optional_env("JWT_SECRET")) {
                 Some(s) => (s, false),
@@ -161,12 +216,73 @@ impl Config {
                 .admin_username
                 .or_else(|| optional_env("ADMIN_USERNAME"))
                 .unwrap_or_else(|| "admin".into()),
+            browse_lists,
             admin_password: cli
                 .admin_password
                 .or_else(|| optional_env("ADMIN_PASSWORD"))
                 .unwrap_or_else(|| "admin123".into()),
         }
     }
+}
+
+fn configured_browse_lists(cli: &CliArgs) -> Vec<BrowseList> {
+    let mut tokens = cli.browse_lists.clone();
+    if let Some(raw) = optional_env("BROWSE_LISTS") {
+        push_list_tokens(&mut tokens, &raw);
+    }
+    let mut lists = default_browse_lists();
+    for token in tokens {
+        let Some(list) = parse_browse_list(&token) else {
+            continue;
+        };
+        if lists
+            .iter()
+            .any(|existing| existing.user == list.user && existing.slug == list.slug)
+        {
+            continue;
+        }
+        lists.push(list);
+    }
+    lists
+}
+
+fn push_list_tokens(out: &mut Vec<String>, raw: &str) {
+    out.extend(
+        raw.split(',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_string),
+    );
+}
+
+fn default_browse_lists() -> Vec<BrowseList> {
+    [
+        "movie:snoak/imdb-top-250-movies",
+        "tv:snoak/imdb-top-250-shows",
+        "movie:snoak/most-popular-movies-on-rotten-tomatoes",
+        "tv:snoak/most-popular-shows-on-rotten-tomatoes",
+    ]
+    .into_iter()
+    .filter_map(parse_browse_list)
+    .collect()
+}
+
+fn parse_browse_list(raw: &str) -> Option<BrowseList> {
+    let (kind, rest) = raw.trim().split_once(':')?;
+    if kind != "movie" && kind != "tv" {
+        return None;
+    }
+    let (user, slug) = rest.split_once('/')?;
+    let user = user.trim();
+    let slug = slug.trim().trim_matches('/');
+    if user.is_empty() || slug.is_empty() || slug.contains('/') {
+        return None;
+    }
+    Some(BrowseList {
+        user: user.to_string(),
+        slug: slug.to_string(),
+        media_type: kind.to_string(),
+    })
 }
 
 fn optional_env(key: &str) -> Option<String> {
@@ -379,6 +495,48 @@ mod tests {
             .await
             .expect("connect localhost");
         drop(listeners);
+    }
+
+    #[test]
+    fn browse_lists_keep_defaults_and_append_cli_lists() {
+        let cli = CliArgs::parse(
+            [
+                "medianexus-backend",
+                "--list",
+                "movie:alice/my-list",
+                "--lists",
+                "tv:bob/other,movie:snoak/imdb-top-250-movies,snoak/missing-type",
+            ]
+            .map(String::from),
+        );
+        let config = Config::from_cli_and_env(cli);
+        let ids: Vec<_> = config
+            .browse_lists
+            .iter()
+            .map(|list| format!("{}/{}", list.user, list.slug))
+            .collect();
+        assert!(ids.starts_with(&[
+            "snoak/imdb-top-250-movies".into(),
+            "snoak/imdb-top-250-shows".into(),
+            "snoak/most-popular-movies-on-rotten-tomatoes".into(),
+            "snoak/most-popular-shows-on-rotten-tomatoes".into(),
+        ]));
+        assert!(ids.iter().any(|id| id == "alice/my-list"));
+        assert!(ids.iter().any(|id| id == "bob/other"));
+        assert!(!ids.iter().any(|id| id.contains("missing-type")));
+        assert_eq!(
+            ids.iter()
+                .filter(|id| id.as_str() == "snoak/imdb-top-250-movies")
+                .count(),
+            1
+        );
+        let shows = config
+            .browse_lists
+            .iter()
+            .find(|list| list.slug == "imdb-top-250-shows")
+            .unwrap();
+        assert_eq!(shows.media_type(), "tv");
+        assert_eq!(shows.label(), "IMDb Top 250");
     }
 
     #[test]
