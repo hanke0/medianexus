@@ -66,6 +66,10 @@ export type MediaItem = {
   poster_url?: string | null;
   overview?: string | null;
   imdb_id?: string | null;
+  /** IMDb score, 0–10. */
+  imdb_rating?: number | null;
+  /** Rotten Tomatoes critics score, 0–100. */
+  rt_rating?: number | null;
   popularity?: number | null;
   vote_average?: number | null;
   seasons?: TvSeason[];
@@ -176,6 +180,8 @@ export type IntegrationSettings = {
   tmdb_api_key: string;
   /** TMDB language, e.g. zh-CN / en-US. Default zh-CN. */
   tmdb_language: string;
+  /** MDBList key for IMDb and Rotten Tomatoes scores. Empty hides those scores. */
+  mdblist_api_key: string;
   /** Hardlink folder template, e.g. {{title}}-{{year}}. */
   hardlink_folder_template: string;
   mteam_api_key: string;

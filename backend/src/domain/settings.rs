@@ -1,5 +1,6 @@
 use crate::domain::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::infra::mdblist::MdblistClient;
 use crate::infra::pt::PtRegistry;
 use crate::infra::qbittorrent::QbittorrentClient;
 use crate::infra::tmdb::TmdbClient;
@@ -14,6 +15,9 @@ pub struct IntegrationSettings {
     /// TMDB API language, e.g. `zh-CN`, `en-US`. Default Chinese.
     #[serde(default = "default_tmdb_language")]
     pub tmdb_language: String,
+    /// MDBList key used to read IMDb and Rotten Tomatoes scores. Empty skips those scores.
+    #[serde(default)]
+    pub mdblist_api_key: String,
     /// Hardlink folder name template. Placeholders: `{{title}}`, `{{year}}`, `{{original_title}}`, `{{tmdb_id}}`.
     #[serde(default = "default_hardlink_folder_template")]
     pub hardlink_folder_template: String,
@@ -120,6 +124,7 @@ impl Default for IntegrationSettings {
         Self {
             tmdb_api_key: String::new(),
             tmdb_language: default_tmdb_language(),
+            mdblist_api_key: String::new(),
             hardlink_folder_template: default_hardlink_folder_template(),
             mteam_api_key: String::new(),
             mteam_api_base: default_mteam_base(),
@@ -160,6 +165,7 @@ impl IntegrationSettings {
                 self.tmdb_api_key.clone(),
                 self.tmdb_language.clone(),
             ),
+            mdblist: MdblistClient::new(http.clone(), self.mdblist_api_key.clone()),
             pt: PtRegistry::from_settings(http.clone(), self),
             qb: QbittorrentClient::new(
                 http,
@@ -176,6 +182,7 @@ impl IntegrationSettings {
 #[derive(Clone)]
 pub struct IntegrationClients {
     pub tmdb: TmdbClient,
+    pub mdblist: MdblistClient,
     pub pt: PtRegistry,
     pub qb: QbittorrentClient,
 }
@@ -194,6 +201,7 @@ pub async fn load(db: &SqlitePool) -> AppResult<IntegrationSettings> {
                     s.tmdb_language = value;
                 }
             }
+            "mdblist_api_key" => s.mdblist_api_key = value,
             "hardlink_folder_template" => {
                 if !value.trim().is_empty() {
                     s.hardlink_folder_template = value;
@@ -262,6 +270,7 @@ pub async fn save(db: &SqlitePool, s: &IntegrationSettings) -> AppResult<()> {
     let pairs = [
         ("tmdb_api_key", s.tmdb_api_key.as_str()),
         ("tmdb_language", s.tmdb_language.as_str()),
+        ("mdblist_api_key", s.mdblist_api_key.as_str()),
         (
             "hardlink_folder_template",
             s.hardlink_folder_template.as_str(),

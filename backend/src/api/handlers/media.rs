@@ -66,7 +66,7 @@ pub async fn search_media(
         .tmdb
         .search(keyword, &q.media_type, page)
         .await?;
-    Ok(Json(items))
+    Ok(Json(with_ratings(&state, items).await))
 }
 
 #[utoipa::path(
@@ -91,7 +91,7 @@ pub async fn list_movies(
     } else {
         tmdb.latest_movies(page).await?
     };
-    Ok(Json(items))
+    Ok(Json(with_ratings(&state, items).await))
 }
 
 #[utoipa::path(
@@ -116,7 +116,7 @@ pub async fn list_tv(
     } else {
         tmdb.latest_tv(page).await?
     };
-    Ok(Json(items))
+    Ok(Json(with_ratings(&state, items).await))
 }
 
 #[utoipa::path(
@@ -144,7 +144,14 @@ pub async fn get_media(
             ))
         }
     };
-    Ok(Json(item))
+    let mut rated = with_ratings(&state, vec![item]).await;
+    Ok(Json(rated.remove(0)))
+}
+
+async fn with_ratings(state: &AppState, mut items: Vec<MediaItem>) -> Vec<MediaItem> {
+    let client = state.clients().await.mdblist;
+    crate::infra::mdblist::attach(&state.db, &client, &mut items).await;
+    items
 }
 
 #[utoipa::path(

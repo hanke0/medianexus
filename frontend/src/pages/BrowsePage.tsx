@@ -8,10 +8,23 @@ import styles from "./BrowsePage.module.css";
 
 type Tab = "movies" | "tv";
 type Kind = "latest" | "popular";
+type Sort = "default" | "imdb" | "rt";
+
+function byRating(pick: (item: MediaItem) => number | null | undefined) {
+  return (a: MediaItem, b: MediaItem) => {
+    const left = pick(a);
+    const right = pick(b);
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return right - left;
+  };
+}
 
 export function BrowsePage() {
   const [tab, setTab] = useState<Tab>("movies");
   const [kind, setKind] = useState<Kind>("latest");
+  const [sort, setSort] = useState<Sort>("default");
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [queryText, setQueryText] = useState("");
@@ -52,7 +65,15 @@ export function BrowsePage() {
     },
   });
 
-  const items = useMemo(() => query.data ?? [], [query.data]);
+  const items = useMemo(() => {
+    const list = [...(query.data ?? [])];
+    if (sort === "imdb") list.sort(byRating((item) => item.imdb_rating));
+    if (sort === "rt") list.sort(byRating((item) => item.rt_rating));
+    return list;
+  }, [query.data, sort]);
+  const missingScores =
+    items.length > 0 &&
+    items.every((item) => item.imdb_rating == null && item.rt_rating == null);
 
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
@@ -108,35 +129,65 @@ export function BrowsePage() {
             电视剧
           </button>
         </div>
-        {!searching && (
-          <div className={styles.tabs}>
+        <div className={styles.tools}>
+          {!searching && (
+            <div className={styles.tabs}>
+              <button
+                type="button"
+                className={kind === "latest" ? styles.active : undefined}
+                onClick={() => {
+                  setKind("latest");
+                  setPage(1);
+                }}
+              >
+                最新
+              </button>
+              <button
+                type="button"
+                className={kind === "popular" ? styles.active : undefined}
+                onClick={() => {
+                  setKind("popular");
+                  setPage(1);
+                }}
+              >
+                热门
+              </button>
+            </div>
+          )}
+          <div className={styles.tabs} aria-label="评分排序">
             <button
               type="button"
-              className={kind === "latest" ? styles.active : undefined}
-              onClick={() => {
-                setKind("latest");
-                setPage(1);
-              }}
+              className={sort === "default" ? styles.active : undefined}
+              onClick={() => setSort("default")}
             >
-              最新
+              默认
             </button>
             <button
               type="button"
-              className={kind === "popular" ? styles.active : undefined}
-              onClick={() => {
-                setKind("popular");
-                setPage(1);
-              }}
+              className={sort === "imdb" ? styles.active : undefined}
+              onClick={() => setSort("imdb")}
             >
-              热门
+              IMDb
+            </button>
+            <button
+              type="button"
+              className={sort === "rt" ? styles.active : undefined}
+              onClick={() => setSort("rt")}
+            >
+              烂番茄
             </button>
           </div>
-        )}
+        </div>
       </div>
 
       {searching && (
         <p className={styles.muted}>
           搜索「{queryText}」· {tab === "movies" ? "电影" : "电视剧"}
+        </p>
+      )}
+      {!query.isLoading && missingScores && (
+        <p className={styles.muted}>
+          没有 IMDb / 烂番茄评分。管理员可在设置中填写 MDBList API Key。
         </p>
       )}
 

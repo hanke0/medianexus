@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { RatingBadges } from "@/components/RatingBadges";
 import { useToast } from "@/components/Toast";
 import { ApiError, endpoints, type Track, type TvSeason } from "@/lib/api";
 import styles from "./MediaDetailPage.module.css";
@@ -128,9 +129,7 @@ export function MediaDetailPage() {
               {item.media_type === "tv" ? "电视剧" : "电影"}
             </span>
             {item.year && <span className="badge">{item.year}</span>}
-            {item.vote_average != null && (
-              <span className="badge">{item.vote_average.toFixed(1)}</span>
-            )}
+            <RatingBadges item={item} />
             {item.imdb_id && <span className="badge">{item.imdb_id}</span>}
             {inLibrary && <span className="badge ok">库中已有</span>}
           </div>

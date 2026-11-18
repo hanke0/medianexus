@@ -18,6 +18,7 @@ const SAVE_DEBOUNCE_MS = 500;
 const empty: IntegrationSettings = {
   tmdb_api_key: "",
   tmdb_language: "zh-CN",
+  mdblist_api_key: "",
   hardlink_folder_template: "{{title}}-{{year}}",
   mteam_api_key: "",
   mteam_api_base: "https://api.m-team.cc",
@@ -240,6 +241,22 @@ export function SettingsPage() {
               placeholder="{{title}}-{{year}}"
             />
           </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>评分</legend>
+          <label className="field">
+            <span>MDBList API Key</span>
+            <input
+              type="password"
+              value={form.mdblist_api_key}
+              onChange={set("mdblist_api_key")}
+              autoComplete="off"
+            />
+          </label>
+          <p className={styles.scheduleHint}>
+            用于展示 IMDb 和烂番茄评分。在 mdblist.com 的偏好设置里生成免费 Key。
+          </p>
         </fieldset>
 
         <fieldset>

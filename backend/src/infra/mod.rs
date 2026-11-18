@@ -1,5 +1,6 @@
 pub mod db;
 pub mod hardlink;
+pub mod mdblist;
 pub mod media_server;
 pub mod plex;
 pub mod pt;
