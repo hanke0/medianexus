@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
 import { Select } from "@/components/Select";
 import { useToast } from "@/components/Toast";
@@ -17,14 +17,29 @@ const FALLBACK_CATALOGS: MediaCatalog[] = [
 ];
 
 export function BrowsePage() {
-  const [tab, setTab] = useState<Tab>("movies");
-  const [catalog, setCatalog] = useState("tmdb:latest");
-  const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState("");
-  const [queryText, setQueryText] = useState("");
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = params.get("tab") === "tv" ? "tv" : "movies";
+  const catalog = params.get("list") ?? "tmdb:latest";
+  const page = Math.max(1, Number(params.get("page")) || 1);
+  const queryText = params.get("q") ?? "";
+  const [searchInput, setSearchInput] = useState(queryText);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { showToast } = useToast();
+
+  const updateParams = (changes: Record<string, string | null>) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(changes)) {
+          if (value) next.set(key, value);
+          else next.delete(key);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const searching = queryText.trim().length > 0;
   const searchType = tab === "movies" ? "movie" : "tv";
@@ -71,14 +86,12 @@ export function BrowsePage() {
 
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
-    setQueryText(searchInput.trim());
-    setPage(1);
+    updateParams({ q: searchInput.trim(), page: null });
   };
 
   const clearSearch = () => {
     setSearchInput("");
-    setQueryText("");
-    setPage(1);
+    updateParams({ q: null, page: null });
   };
 
   return (
@@ -105,20 +118,14 @@ export function BrowsePage() {
           <button
             type="button"
             className={tab === "movies" ? styles.active : undefined}
-            onClick={() => {
-              setTab("movies");
-              setPage(1);
-            }}
+            onClick={() => updateParams({ tab: null, page: null })}
           >
             电影
           </button>
           <button
             type="button"
             className={tab === "tv" ? styles.active : undefined}
-            onClick={() => {
-              setTab("tv");
-              setPage(1);
-            }}
+            onClick={() => updateParams({ tab: "tv", page: null })}
           >
             电视剧
           </button>
@@ -133,10 +140,7 @@ export function BrowsePage() {
                   value: item.id,
                   label: item.label,
                 }))}
-                onChange={(value) => {
-                  setCatalog(value);
-                  setPage(1);
-                }}
+                onChange={(value) => updateParams({ list: value, page: null })}
               />
             </div>
           )}
@@ -186,7 +190,7 @@ export function BrowsePage() {
           type="button"
           className="btn ghost"
           disabled={page <= 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          onClick={() => updateParams({ page: String(page - 1) })}
         >
           上一页
         </button>
@@ -195,7 +199,7 @@ export function BrowsePage() {
           type="button"
           className="btn ghost"
           disabled={items.length === 0}
-          onClick={() => setPage((p) => p + 1)}
+          onClick={() => updateParams({ page: String(page + 1) })}
         >
           下一页
         </button>

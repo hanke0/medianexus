@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, ScrollRestoration, useNavigate } from "react-router-dom";
 import { clearAuth, getUser, isAdmin } from "@/lib/auth";
 import styles from "./AppLayout.module.css";
 
@@ -81,6 +81,7 @@ export function AppLayout() {
       <main className={styles.main}>
         <Outlet />
       </main>
+      <ScrollRestoration />
     </div>
   );
 }

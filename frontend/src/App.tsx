@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
@@ -9,27 +9,26 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { MediaDetailPage } from "@/pages/MediaDetailPage";
 import { MaintenancePage } from "@/pages/MaintenancePage";
 
+const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage /> },
+  {
+    element: (
+      <ProtectedRoute>
+        <AppLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { path: "/", element: <BrowsePage /> },
+      { path: "/media/:mediaType/:tmdbId", element: <MediaDetailPage /> },
+      { path: "/tracks", element: <TracksPage /> },
+      { path: "/admin/users", element: <AdminUsersPage /> },
+      { path: "/admin/settings", element: <SettingsPage /> },
+      { path: "/admin/maintenance", element: <MaintenancePage /> },
+    ],
+  },
+  { path: "*", element: <Navigate to="/" replace /> },
+]);
+
 export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path="/" element={<BrowsePage />} />
-          <Route path="/media/:mediaType/:tmdbId" element={<MediaDetailPage />} />
-          <Route path="/tracks" element={<TracksPage />} />
-          <Route path="/admin/users" element={<AdminUsersPage />} />
-          <Route path="/admin/settings" element={<SettingsPage />} />
-          <Route path="/admin/maintenance" element={<MaintenancePage />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
-  );
+  return <RouterProvider router={router} />;
 }
