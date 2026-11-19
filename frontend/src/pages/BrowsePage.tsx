@@ -10,8 +10,8 @@ import styles from "./BrowsePage.module.css";
 type Tab = "movies" | "tv";
 
 const FALLBACK_CATALOGS: MediaCatalog[] = [
-  { id: "tmdb:latest", label: "TMDB 最新", media_type: "all" },
   { id: "tmdb:popular", label: "TMDB 最热", media_type: "all" },
+  { id: "tmdb:latest", label: "TMDB 最新", media_type: "all" },
   { id: "tmdb:top", label: "TMDB 高分", media_type: "all" },
   { id: "imdb:moviemeter", label: "IMDb 最热", media_type: "all" },
 ];
@@ -19,7 +19,7 @@ const FALLBACK_CATALOGS: MediaCatalog[] = [
 export function BrowsePage() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("tab") === "tv" ? "tv" : "movies";
-  const catalog = params.get("list") ?? "tmdb:latest";
+  const catalog = params.get("list") ?? "tmdb:popular";
   const page = Math.max(1, Number(params.get("page")) || 1);
   const queryText = params.get("q") ?? "";
   const [searchInput, setSearchInput] = useState(queryText);
@@ -52,7 +52,7 @@ export function BrowsePage() {
   );
   const activeCatalog = catalogOptions.some((item) => item.id === catalog)
     ? catalog
-    : "tmdb:latest";
+    : "tmdb:popular";
 
   const query = useQuery({
     queryKey: searching

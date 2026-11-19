@@ -93,8 +93,8 @@ pub async fn list_catalogs(State(state): State<AppState>) -> Json<Vec<MediaCatal
 
 fn catalogs(extra: &[BrowseList]) -> Vec<MediaCatalog> {
     let mut out = vec![
-        builtin("tmdb:latest", "TMDB 最新"),
         builtin("tmdb:popular", "TMDB 最热"),
+        builtin("tmdb:latest", "TMDB 最新"),
         builtin("tmdb:top", "TMDB 高分"),
         builtin("imdb:moviemeter", "IMDb 最热"),
     ];
