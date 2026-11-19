@@ -53,10 +53,6 @@ export function MaintenancePage() {
 
   return (
     <div className={styles.page}>
-      <p className="notice">
-        先在「发现」添加追踪；后台会按设置自动搜种、检查下载并入库。这里可手动触发维护任务。
-      </p>
-
       <div className={styles.tools}>
         {(toolsQuery.data ?? []).map((tool) => (
           <article key={tool.id} className={styles.card}>

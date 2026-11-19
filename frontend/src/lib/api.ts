@@ -215,6 +215,8 @@ export type IntegrationSettings = {
   /** Library scan + catalog sync interval in seconds (default 86400). Min 60. */
   schedule_library_scan_interval_secs: number;
   schedule_library_scan_at?: string;
+  /** Local `HH:MM` when home-page lists are refreshed (default `00:01`). Empty = off. */
+  schedule_browse_warm_at: string;
 };
 
 export type ConnectionTarget = "mteam" | "qbittorrent" | "jellyfin" | "plex";

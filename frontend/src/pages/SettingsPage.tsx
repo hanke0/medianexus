@@ -36,6 +36,7 @@ const empty: IntegrationSettings = {
   schedule_search_interval_secs: 10800,
   schedule_download_interval_secs: 60,
   schedule_library_scan_interval_secs: 86400,
+  schedule_browse_warm_at: "00:01",
 };
 
 const PT_SITE_OPTIONS = [
@@ -447,7 +448,7 @@ export function SettingsPage() {
         <fieldset>
           <legend>定时任务</legend>
           <p className={`notice ${styles.scheduleHint}`}>
-            仅配置间隔（最少 1 分钟）。任务从每天 0:00 起按间隔对齐执行。
+            间隔最少 1 分钟，任务从每天 0:00 起按间隔对齐执行。首页列表缓存每天在设定时间刷新；留空则不自动刷新，缓存在 0 点过期。
           </p>
           <label className="field">
             <span>搜种间隔（分钟）</span>
@@ -474,6 +475,14 @@ export function SettingsPage() {
               min={1}
               value={Math.max(1, Math.round(form.schedule_library_scan_interval_secs / 60))}
               onChange={setIntervalMinutes("schedule_library_scan_interval_secs")}
+            />
+          </label>
+          <label className="field">
+            <span>首页缓存刷新时间（每天，留空关闭）</span>
+            <input
+              type="time"
+              value={form.schedule_browse_warm_at}
+              onChange={set("schedule_browse_warm_at")}
             />
           </label>
         </fieldset>

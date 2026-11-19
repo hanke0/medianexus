@@ -89,6 +89,11 @@ pub struct IntegrationSettings {
     /// Deprecated: ignored. Kept for API/DB compatibility.
     #[serde(default)]
     pub schedule_library_scan_at: String,
+
+    /// Local `HH:MM` when home-page browse lists are refetched; cached pages last until then.
+    /// Empty disables the refresh and cached pages expire at local midnight.
+    #[serde(default = "default_browse_warm_at")]
+    pub schedule_browse_warm_at: String,
 }
 
 fn default_tmdb_language() -> String {
@@ -117,6 +122,9 @@ fn default_download_interval() -> u64 {
 }
 fn default_library_scan_interval() -> u64 {
     24 * 60 * 60
+}
+fn default_browse_warm_at() -> String {
+    "00:01".into()
 }
 
 impl Default for IntegrationSettings {
@@ -153,11 +161,17 @@ impl Default for IntegrationSettings {
             schedule_download_at: String::new(),
             schedule_library_scan_interval_secs: default_library_scan_interval(),
             schedule_library_scan_at: String::new(),
+            schedule_browse_warm_at: default_browse_warm_at(),
         }
     }
 }
 
 impl IntegrationSettings {
+    /// `None` when the scheduled refresh is turned off.
+    pub fn browse_warm_time(&self) -> Option<chrono::NaiveTime> {
+        parse_clock(&self.schedule_browse_warm_at)
+    }
+
     pub fn build_clients(&self, http: reqwest::Client) -> IntegrationClients {
         IntegrationClients {
             tmdb: TmdbClient::new(
@@ -256,6 +270,11 @@ pub async fn load(db: &SqlitePool) -> AppResult<IntegrationSettings> {
                     parse_u64(&value, default_library_scan_interval());
             }
             "schedule_library_scan_at" => s.schedule_library_scan_at = normalize_clock(&value),
+            "schedule_browse_warm_at" => {
+                if value.trim().is_empty() || parse_clock(&value).is_some() {
+                    s.schedule_browse_warm_at = normalize_clock(&value);
+                }
+            }
             _ => {}
         }
     }
@@ -313,6 +332,7 @@ pub async fn save(db: &SqlitePool, s: &IntegrationSettings) -> AppResult<()> {
             "schedule_library_scan_at",
             s.schedule_library_scan_at.as_str(),
         ),
+        ("schedule_browse_warm_at", s.schedule_browse_warm_at.as_str()),
     ];
 
     for (key, value) in pairs {
@@ -417,7 +437,20 @@ fn normalize_schedule(mut s: IntegrationSettings) -> AppResult<IntegrationSettin
     s.schedule_search_at.clear();
     s.schedule_download_at.clear();
     s.schedule_library_scan_at.clear();
+    if !s.schedule_browse_warm_at.trim().is_empty()
+        && parse_clock(&s.schedule_browse_warm_at).is_none()
+    {
+        return Err(AppError::BadRequest("首页缓存刷新时间格式应为 HH:MM".into()));
+    }
+    s.schedule_browse_warm_at = normalize_clock(&s.schedule_browse_warm_at);
     Ok(s)
+}
+
+fn parse_clock(raw: &str) -> Option<chrono::NaiveTime> {
+    let mut parts = raw.trim().split(':');
+    let h = parts.next()?.parse::<u32>().ok()?;
+    let m = parts.next()?.parse::<u32>().ok()?;
+    chrono::NaiveTime::from_hms_opt(h, m, 0)
 }
 
 fn normalize_clock(raw: &str) -> String {
@@ -460,5 +493,30 @@ fn optional(s: &str) -> Option<String> {
         None
     } else {
         Some(t.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browse_warm_time_defaults_and_validates() {
+        let mut s = IntegrationSettings::default();
+        assert_eq!(s.browse_warm_time(), chrono::NaiveTime::from_hms_opt(0, 1, 0));
+
+        s.schedule_browse_warm_at = "6:5:00".into();
+        let s = normalize_schedule(s).unwrap();
+        assert_eq!(s.schedule_browse_warm_at, "06:05");
+
+        let mut bad = IntegrationSettings::default();
+        bad.schedule_browse_warm_at = "25:00".into();
+        assert!(normalize_schedule(bad).is_err());
+
+        let mut off = IntegrationSettings::default();
+        off.schedule_browse_warm_at = " ".into();
+        let off = normalize_schedule(off).unwrap();
+        assert_eq!(off.schedule_browse_warm_at, "");
+        assert_eq!(off.browse_warm_time(), None);
     }
 }

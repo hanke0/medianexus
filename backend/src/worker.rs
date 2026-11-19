@@ -9,10 +9,26 @@ use std::time::Duration;
 pub fn spawn(state: AppState) {
     tokio::spawn(search_loop(state.clone()));
     tokio::spawn(download_loop(state.clone()));
-    tokio::spawn(library_scan_loop(state));
+    tokio::spawn(library_scan_loop(state.clone()));
+    tokio::spawn(browse_warm_loop(state));
     tracing::info!(
-        "MediaNexus schedulers started (search / download / library-scan; intervals from settings)"
+        "MediaNexus schedulers started (search / download / library-scan / browse-warm; times from settings)"
     );
+}
+
+/// Browse pages expire at the configured warm time; refill them then so first visits hit the cache.
+/// Polls instead of sleeping until the target so a changed time applies without a restart.
+async fn browse_warm_loop(state: AppState) {
+    let mut since = Local::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        let now = Local::now();
+        let at = state.settings().await.browse_warm_time();
+        if at.is_some_and(|at| crate::state::next_local_time(since, at) <= now) {
+            crate::api::handlers::media::warm_browse_cache(&state).await;
+        }
+        since = now;
+    }
 }
 
 async fn search_loop(state: AppState) {

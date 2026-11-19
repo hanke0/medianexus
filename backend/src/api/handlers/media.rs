@@ -161,15 +161,52 @@ async fn browse(state: &AppState, media_type: &str, q: BrowseQuery) -> AppResult
         catalog
     };
     let clients = state.clients().await;
-    let key = format!(
-        "{media_type}|{catalog}|{page}|{}",
-        clients.tmdb.language()
-    );
+    let key = browse_key(&clients, media_type, catalog, page);
     if let Some(items) = state.cached_browse(&key).await {
         return Ok(items);
     }
-    let items = load_catalog(state, &clients, media_type, catalog, page).await?;
+    fetch_browse(state, &clients, media_type, catalog, page).await
+}
+
+/// Pause between warmed pages; each page already bursts up to ~20 TMDB/MDBList requests.
+const WARM_PAUSE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Refetch the first page of every browse list so the first visit of the day hits the cache.
+pub async fn warm_browse_cache(state: &AppState) {
+    let clients = state.clients().await;
+    for catalog in catalogs(&state.config.browse_lists) {
+        for media_type in ["movie", "tv"] {
+            if catalog.media_type != "all" && catalog.media_type != media_type {
+                continue;
+            }
+            tokio::time::sleep(WARM_PAUSE).await;
+            if let Err(err) = fetch_browse(state, &clients, media_type, &catalog.id, 1).await {
+                tracing::warn!(catalog = %catalog.id, media_type, error = %err, "warm browse cache failed");
+            }
+        }
+    }
+    tracing::info!("browse cache warmed");
+}
+
+fn browse_key(
+    clients: &crate::domain::settings::IntegrationClients,
+    media_type: &str,
+    catalog: &str,
+    page: u32,
+) -> String {
+    format!("{media_type}|{catalog}|{page}|{}", clients.tmdb.language())
+}
+
+async fn fetch_browse(
+    state: &AppState,
+    clients: &crate::domain::settings::IntegrationClients,
+    media_type: &str,
+    catalog: &str,
+    page: u32,
+) -> AppResult<Vec<MediaItem>> {
+    let items = load_catalog(state, clients, media_type, catalog, page).await?;
     let items = with_ratings(state, items).await;
+    let key = browse_key(clients, media_type, catalog, page);
     state.remember_browse(key, items.clone()).await;
     Ok(items)
 }
