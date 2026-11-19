@@ -1,12 +1,14 @@
 use crate::config::Config;
+use crate::domain::maintenance::MaintenanceJob;
 use crate::domain::settings::{IntegrationClients, IntegrationSettings};
 use crate::error::AppResult;
 use crate::infra::tmdb::MediaItem;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use chrono::{Local, TimeZone};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,6 +16,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub http: reqwest::Client,
     integrations: Arc<RwLock<IntegrationBundle>>,
+    /// Latest manual maintenance run per tool id.
+    pub maintenance_jobs: Arc<std::sync::Mutex<HashMap<String, MaintenanceJob>>>,
+    /// Serializes catalog syncs between manual runs and the scheduler.
+    pub catalog_sync_lock: Arc<Mutex<()>>,
 }
 
 struct IntegrationBundle {
@@ -37,6 +43,8 @@ impl AppState {
             config: Arc::new(config),
             http,
             integrations: Arc::new(RwLock::new(IntegrationBundle { settings, clients })),
+            maintenance_jobs: Arc::default(),
+            catalog_sync_lock: Arc::default(),
         })
     }
 

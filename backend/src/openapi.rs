@@ -1,6 +1,8 @@
 use crate::api::handlers;
 use crate::domain::connection_test::ConnectionTestResult;
-use crate::domain::maintenance::{LibraryItemRow, MaintenanceRunResult, MaintenanceToolDto};
+use crate::domain::maintenance::{
+    LibraryItemRow, MaintenanceJob, MaintenanceRunResult, MaintenanceToolDto,
+};
 use crate::domain::settings::IntegrationSettings;
 use crate::domain::track::{CreateTrackRequest, Track};
 use crate::error::ApiErrorBody;
@@ -40,6 +42,7 @@ use utoipa::{Modify, OpenApi};
         handlers::settings::test_connection,
         handlers::maintenance::list_tools,
         handlers::maintenance::run_tool,
+        handlers::maintenance::list_jobs,
         handlers::maintenance::list_library_items,
     ),
     components(schemas(
@@ -64,6 +67,7 @@ use utoipa::{Modify, OpenApi};
         crate::infra::media_server::LibraryMatch,
         MaintenanceToolDto,
         MaintenanceRunResult,
+        MaintenanceJob,
         handlers::maintenance::RunToolRequest,
         LibraryItemRow,
     )),

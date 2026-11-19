@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useToast } from "@/components/Toast";
 import { ApiError, endpoints, type LibraryItemRow, type MaintenanceRunResult } from "@/lib/api";
@@ -33,19 +33,52 @@ export function MaintenancePage() {
     enabled: allowed,
   });
 
-  const runMutation = useMutation({
-    mutationFn: (tool: string) => endpoints.runMaintenance(tool),
-    onSuccess: (res) => {
-      setLastResult(res);
-      showToast(res.message, res.ok ? "ok" : "error");
+  const jobsQuery = useQuery({
+    queryKey: ["maintenance-jobs"],
+    queryFn: endpoints.maintenanceJobs,
+    enabled: allowed,
+    refetchInterval: (query) =>
+      query.state.data?.some((j) => j.status === "running") ? 2000 : false,
+  });
+
+  // Tools seen running, so a later poll showing them finished triggers one notification.
+  const runningTools = useRef(new Set<string>());
+
+  useEffect(() => {
+    for (const job of jobsQuery.data ?? []) {
+      if (job.status === "running") {
+        runningTools.current.add(job.tool);
+        continue;
+      }
+      if (!runningTools.current.delete(job.tool)) continue;
+      if (job.status === "succeeded" && job.result) {
+        setLastResult(job.result);
+        showToast(job.result.message, job.result.ok ? "ok" : "error");
+      } else {
+        setLastResult(null);
+        showToast(job.error ?? "执行失败", "error");
+      }
       queryClient.invalidateQueries({ queryKey: ["library-items"] });
       queryClient.invalidateQueries({ queryKey: ["tracks"] });
+    }
+  }, [jobsQuery.data, queryClient, showToast]);
+
+  const runMutation = useMutation({
+    mutationFn: (tool: string) => endpoints.runMaintenance(tool),
+    onSuccess: (job) => {
+      runningTools.current.add(job.tool);
+      showToast("已开始在后台执行", "ok");
+      queryClient.invalidateQueries({ queryKey: ["maintenance-jobs"] });
     },
     onError: (err: unknown) => {
-      setLastResult(null);
       showToast(err instanceof ApiError ? err.message : "执行失败", "error");
+      queryClient.invalidateQueries({ queryKey: ["maintenance-jobs"] });
     },
   });
+
+  const isRunning = (tool: string) =>
+    (runMutation.isPending && runMutation.variables === tool) ||
+    (jobsQuery.data ?? []).some((j) => j.tool === tool && j.status === "running");
 
   if (!allowed) {
     return <Navigate to="/" replace />;
@@ -61,12 +94,10 @@ export function MaintenancePage() {
             <button
               type="button"
               className="btn"
-              disabled={runMutation.isPending}
+              disabled={isRunning(tool.id)}
               onClick={() => runMutation.mutate(tool.id)}
             >
-              {runMutation.isPending && runMutation.variables === tool.id
-                ? "执行中…"
-                : "运行"}
+              {isRunning(tool.id) ? "执行中…" : "运行"}
             </button>
           </article>
         ))}

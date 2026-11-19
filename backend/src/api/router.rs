@@ -80,6 +80,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/maintenance/tools", get(handlers::maintenance::list_tools))
         .route("/maintenance/run", post(handlers::maintenance::run_tool))
+        .route("/maintenance/jobs", get(handlers::maintenance::list_jobs))
         .route(
             "/maintenance/library-items",
             get(handlers::maintenance::list_library_items),

@@ -1,9 +1,10 @@
 use crate::api::middleware::auth::AuthContext;
-use crate::domain::maintenance::{self, LibraryItemRow, MaintenanceRunResult, MaintenanceToolDto};
-use crate::error::AppResult;
+use crate::domain::maintenance::{self, LibraryItemRow, MaintenanceJob, MaintenanceToolDto};
+use crate::error::{ApiErrorBody, AppResult};
 use crate::state::AppState;
 use axum::{
     extract::{Query, State},
+    http::StatusCode,
     Extension, Json,
 };
 use serde::Deserialize;
@@ -49,17 +50,33 @@ pub async fn list_tools(
     path = "/maintenance/run",
     tag = "Maintenance",
     request_body = RunToolRequest,
-    responses((status = 200, body = MaintenanceRunResult)),
+    responses(
+        (status = 202, body = MaintenanceJob),
+        (status = 409, body = ApiErrorBody, description = "tool already running")
+    ),
     security(("bearer_auth" = []))
 )]
 pub async fn run_tool(
     State(state): State<AppState>,
     Extension(AuthContext(user)): Extension<AuthContext>,
     Json(req): Json<RunToolRequest>,
-) -> AppResult<Json<MaintenanceRunResult>> {
-    Ok(Json(
-        maintenance::run_tool(&state, &user, req.tool.trim()).await?,
-    ))
+) -> AppResult<(StatusCode, Json<MaintenanceJob>)> {
+    let job = maintenance::start_tool(&state, &user, req.tool.trim())?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/maintenance/jobs",
+    tag = "Maintenance",
+    responses((status = 200, body = [MaintenanceJob])),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    Extension(AuthContext(user)): Extension<AuthContext>,
+) -> AppResult<Json<Vec<MaintenanceJob>>> {
+    Ok(Json(maintenance::list_jobs(&state, &user)?))
 }
 
 #[utoipa::path(

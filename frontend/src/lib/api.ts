@@ -121,6 +121,15 @@ export type MaintenanceRunResult = {
   count?: number | null;
 };
 
+export type MaintenanceJob = {
+  tool: string;
+  status: "running" | "succeeded" | "failed";
+  started_at: string;
+  finished_at?: string | null;
+  result?: MaintenanceRunResult | null;
+  error?: string | null;
+};
+
 export type LibraryItemRow = {
   id: string;
   source: string;
@@ -292,10 +301,11 @@ export const endpoints = {
     api<ConnectionTestResult>(`/settings/test/${target}`, { method: "POST" }),
   maintenanceTools: () => api<MaintenanceToolDto[]>("/maintenance/tools"),
   runMaintenance: (tool: string) =>
-    api<MaintenanceRunResult>("/maintenance/run", {
+    api<MaintenanceJob>("/maintenance/run", {
       method: "POST",
       body: JSON.stringify({ tool }),
     }),
+  maintenanceJobs: () => api<MaintenanceJob[]>("/maintenance/jobs"),
   libraryItems: (params?: {
     media_type?: string;
     source?: string;

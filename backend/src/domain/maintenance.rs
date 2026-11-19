@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::infra::media_server::{self, CatalogItem};
 use crate::state::AppState;
 use crate::worker;
+use chrono::Local;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -56,15 +57,85 @@ pub fn list_tools() -> Vec<MaintenanceToolDto> {
     ]
 }
 
-pub async fn run_tool(
-    state: &AppState,
-    actor: &AuthUser,
-    tool: &str,
-) -> AppResult<MaintenanceRunResult> {
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MaintenanceJob {
+    pub tool: String,
+    /// running | succeeded | failed
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub result: Option<MaintenanceRunResult>,
+    pub error: Option<String>,
+}
+
+/// Start a tool in the background; poll `list_jobs` for the outcome.
+pub fn start_tool(state: &AppState, actor: &AuthUser, tool: &str) -> AppResult<MaintenanceJob> {
     if !actor.is_admin() {
         return Err(AppError::Forbidden("admin only".into()));
     }
+    if !list_tools().iter().any(|t| t.id == tool) {
+        return Err(AppError::BadRequest(format!("unknown tool: {tool}")));
+    }
 
+    let job = MaintenanceJob {
+        tool: tool.to_string(),
+        status: "running".into(),
+        started_at: Local::now().to_rfc3339(),
+        finished_at: None,
+        result: None,
+        error: None,
+    };
+    {
+        let mut jobs = state.maintenance_jobs.lock().unwrap();
+        if jobs.get(tool).is_some_and(|j| j.status == "running") {
+            return Err(AppError::Conflict("该任务正在执行中".into()));
+        }
+        jobs.insert(tool.to_string(), job.clone());
+    }
+
+    let state = state.clone();
+    let tool = tool.to_string();
+    tokio::spawn(async move {
+        // Inner task so a panic still marks the job failed instead of leaving it running.
+        let inner = {
+            let state = state.clone();
+            let tool = tool.clone();
+            tokio::spawn(async move { run_tool(&state, &tool).await })
+        };
+        let outcome = match inner.await {
+            Ok(res) => res.map_err(|e| e.to_string()),
+            Err(e) => Err(format!("task aborted: {e}")),
+        };
+        if let Err(e) = &outcome {
+            tracing::error!(tool, "maintenance tool failed: {e}");
+        }
+        let mut jobs = state.maintenance_jobs.lock().unwrap();
+        if let Some(job) = jobs.get_mut(&tool) {
+            job.finished_at = Some(Local::now().to_rfc3339());
+            match outcome {
+                Ok(res) => {
+                    job.status = "succeeded".into();
+                    job.result = Some(res);
+                }
+                Err(e) => {
+                    job.status = "failed".into();
+                    job.error = Some(e);
+                }
+            }
+        }
+    });
+
+    Ok(job)
+}
+
+pub fn list_jobs(state: &AppState, actor: &AuthUser) -> AppResult<Vec<MaintenanceJob>> {
+    if !actor.is_admin() {
+        return Err(AppError::Forbidden("admin only".into()));
+    }
+    Ok(state.maintenance_jobs.lock().unwrap().values().cloned().collect())
+}
+
+async fn run_tool(state: &AppState, tool: &str) -> AppResult<MaintenanceRunResult> {
     match tool {
         "sync_library_catalog" => sync_library_catalog(state).await,
         "run_track_scan" => run_track_scan(state).await,
@@ -86,23 +157,27 @@ async fn sync_library_catalog(state: &AppState) -> AppResult<MaintenanceRunResul
 
 /// Sync remote Plex/Jellyfin catalog into SQLite. Used by maintenance and scheduler.
 pub async fn sync_library_catalog_inner(state: &AppState) -> AppResult<(i64, Vec<String>)> {
+    let _guard = state.catalog_sync_lock.lock().await;
     refresh_plex_jwt(state).await;
     let settings = state.settings().await;
     let (items, notes) = media_server::list_remote_catalog(&state.http, &settings).await?;
 
+    // One transaction so readers keep seeing the old catalog until the new one is complete.
+    let mut tx = state.db.begin().await?;
     sqlx::query("DELETE FROM library_items")
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
     let mut written = 0i64;
     for item in &items {
-        replace_library_item(&state.db, item).await?;
+        replace_library_item(&mut tx, item).await?;
         written += 1;
     }
+    tx.commit().await?;
     Ok((written, notes))
 }
 
-async fn replace_library_item(db: &sqlx::SqlitePool, item: &CatalogItem) -> AppResult<()> {
+async fn replace_library_item(db: &mut sqlx::SqliteConnection, item: &CatalogItem) -> AppResult<()> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         r#"
