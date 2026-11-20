@@ -72,7 +72,9 @@ export function TracksPage() {
     },
   });
 
-  const tracks = query.data ?? [];
+  const tracks = [...(query.data ?? [])].sort(
+    (a, b) => Number(canTrigger(b.status)) - Number(canTrigger(a.status)),
+  );
   const busyId =
     (cancelMutation.isPending && cancelMutation.variables) ||
     (triggerMutation.isPending && triggerMutation.variables) ||
